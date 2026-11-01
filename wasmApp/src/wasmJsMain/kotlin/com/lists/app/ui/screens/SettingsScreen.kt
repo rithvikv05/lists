@@ -32,6 +32,7 @@ import com.lists.app.currentTimeMillis
 import com.lists.app.data.model.Category
 import com.lists.app.data.model.RatingScaleOption
 import com.lists.app.data.repository.AppRepository
+import com.lists.app.data.store.WebStore
 import com.lists.app.data.sync.DriveSyncManager
 import com.lists.app.data.sync.GoogleSignInAccount
 import com.lists.app.data.sync.GoogleSignInHelper
@@ -90,7 +91,8 @@ fun SettingsScreen(
     // Google Drive Sync state
     val signInHelper = remember { GoogleSignInHelper(context) }
     val syncManager = remember { DriveSyncManager(context) }
-    var signedInAccount by remember { mutableStateOf<GoogleSignInAccount?>(signInHelper.getSignedInAccount()) }
+    val userEmail by WebStore.userEmail.collectAsState()
+    val signedInAccount = userEmail?.let { GoogleSignInAccount(it, it) }
     var lastSyncTimestamp by remember { mutableLongStateOf(syncManager.lastSyncTimestamp) }
     var autoSyncEnabled by remember { mutableStateOf(syncManager.autoSyncEnabled) }
     var wifiOnlySync by remember { mutableStateOf(syncManager.wifiOnlySync) }
@@ -316,15 +318,17 @@ fun SettingsScreen(
                                 Button(
                                     onClick = {
                                         signInHelper.requestSignIn { success ->
-                                            signedInAccount = signInHelper.getSignedInAccount()
                                             if (success) {
                                                 coroutineScope.launch {
                                                     isSyncing = true
-                                                    val syncRes = syncManager.syncNow(signedInAccount, repository)
+                                                    val acct = WebStore.userEmail.value?.let { GoogleSignInAccount(it, it) }
+                                                    syncManager.syncNow(acct, repository)
                                                     isSyncing = false
                                                     lastSyncTimestamp = syncManager.lastSyncTimestamp
                                                     statusMessage = "Connected & Synced with Google Drive"
                                                 }
+                                            } else {
+                                                statusMessage = "Failed to connect to Google Drive"
                                             }
                                         }
                                     },
@@ -342,7 +346,6 @@ fun SettingsScreen(
                                     onClick = {
                                         coroutineScope.launch {
                                             signInHelper.signOut()
-                                            signedInAccount = null
                                             statusMessage = "Disconnected from Google Drive"
                                         }
                                     }
@@ -689,8 +692,144 @@ fun SettingsScreen(
                 }
             }
 
+            // SECTION 4: Data Recovery Safeguards
+            var availableBackups by remember { mutableStateOf(WebStore.getAvailableBackups()) }
+            var backupToRestore by remember { mutableStateOf<WebStore.BackupInfo?>(null) }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "DATA RECOVERY SAFEGUARDS",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextGrayMedium,
+                    letterSpacing = 1.sp
+                )
+
+                Surface(
+                    color = DarkCardBg,
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Safety snapshots are automatically captured before and after sync operations. If data is ever missing or accidentally deleted, restore any previous snapshot below with 1 click.",
+                            fontSize = 12.sp,
+                            color = TextSecondary,
+                            lineHeight = 16.sp
+                        )
+
+                        if (availableBackups.isEmpty()) {
+                            Text(
+                                text = "No automatic snapshots recorded yet. They will appear here once you perform actions or sync.",
+                                fontSize = 12.sp,
+                                color = TextGrayMedium
+                            )
+                        } else {
+                            availableBackups.forEach { bInfo ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(DarkCardElevated, RoundedCornerShape(8.dp))
+                                        .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = bInfo.label,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = TextWhite
+                                        )
+                                        Text(
+                                            text = "${bInfo.summary} • ${formatBackupTime(bInfo.timestamp)}",
+                                            fontSize = 11.sp,
+                                            color = TextSecondary
+                                        )
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { backupToRestore = bInfo },
+                                        shape = RoundedCornerShape(6.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            containerColor = Color.Transparent,
+                                            contentColor = AccentWhite
+                                        ),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("Restore", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (backupToRestore != null) {
+                val bInfo = backupToRestore!!
+                AlertDialog(
+                    onDismissRequest = { backupToRestore = null },
+                    containerColor = DarkCardElevated,
+                    title = {
+                        Text(
+                            text = "Restore ${bInfo.label}?",
+                            color = TextWhite,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "This will restore your data to this snapshot (${bInfo.summary}, saved ${formatBackupTime(bInfo.timestamp)}). A safety backup of your current state will be preserved before restoring.",
+                            color = TextSecondary,
+                            fontSize = 13.sp
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val success = WebStore.restoreFromBackup(bInfo.key)
+                                backupToRestore = null
+                                availableBackups = WebStore.getAvailableBackups()
+                                statusMessage = if (success) "Restored successfully from ${bInfo.label}" else "Restore failed"
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AccentWhite,
+                                contentColor = PureBlack
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Confirm Restore", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { backupToRestore = null }) {
+                            Text("Cancel", color = TextGrayMedium, fontSize = 12.sp)
+                        }
+                    }
+                )
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+}
+
+private fun formatBackupTime(ts: Long): String {
+    if (ts <= 0L) return "Recent"
+    val diffSec = (currentTimeMillis() - ts) / 1000
+    return when {
+        diffSec < 60 -> "Just now"
+        diffSec < 3600 -> "${diffSec / 60}m ago"
+        diffSec < 86400 -> "${diffSec / 3600}h ago"
+        else -> "${diffSec / 86400}d ago"
     }
 }
 

@@ -105,3 +105,78 @@ fun jsPickAndReadPackage(onSuccess: (String) -> Unit, onError: (String) -> Unit)
     input.click();
 }""")
 
+fun jsFetchPackageManifest(downloadUrl: String, token: String, onSuccess: (String) -> Unit, onError: (String) -> Unit): Unit = js("""{
+    fetch(downloadUrl, {
+        headers: { "Authorization": "Bearer " + token }
+    }).then(function(res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.arrayBuffer();
+    }).then(function(buf) {
+        if (window.JSZip) {
+            return window.JSZip.loadAsync(buf).then(function(zip) {
+                window.__lastDownloadedZip = zip;
+                var manifest = zip.file("manifest.json");
+                if (!manifest) {
+                    var matches = zip.file(/manifest\.json$/i);
+                    if (matches && matches.length > 0) manifest = matches[0];
+                }
+                if (!manifest) {
+                    var jsonFiles = zip.file(/\.json$/i);
+                    if (jsonFiles && jsonFiles.length > 0) manifest = jsonFiles[0];
+                }
+                if (manifest) {
+                    return manifest.async("string");
+                }
+                throw new Error("No manifest.json found in archive");
+            });
+        }
+        var decoder = new TextDecoder();
+        return decoder.decode(buf);
+    }).then(function(str) {
+        onSuccess(str);
+    }).catch(function(err) {
+        console.error("fetchPackageManifest error:", err);
+        onError(err && err.message ? err.message : String(err));
+    });
+}""")
+
+fun jsUploadPackageToDrive(uploadUrl: String, token: String, manifestJson: String, onSuccess: () -> Unit, onError: (String) -> Unit): Unit = js("""{
+    if (window.JSZip) {
+        var zip = window.__lastDownloadedZip || new window.JSZip();
+        zip.file("manifest.json", manifestJson);
+        zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 9 } }).then(function(blob) {
+            return fetch(uploadUrl, {
+                method: "PATCH",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "Content-Type": "application/octet-stream"
+                },
+                body: blob
+            });
+        }).then(function(res) {
+            if (res.ok) onSuccess();
+            else onError("Upload package failed: " + res.status);
+        }).catch(function(err) {
+            onError(err && err.message ? err.message : String(err));
+        });
+    } else {
+        onError("JSZip not available");
+    }
+}""")
+
+suspend fun fetchPackageManifest(downloadUrl: String, token: String): String =
+    kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        jsFetchPackageManifest(downloadUrl, token,
+            onSuccess = { if (cont.isActive) cont.resumeWith(Result.success(it)) },
+            onError = { if (cont.isActive) cont.resumeWith(Result.failure(Exception(it))) }
+        )
+    }
+
+suspend fun uploadPackageToDrive(uploadUrl: String, token: String, manifestJson: String): Boolean =
+    kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        jsUploadPackageToDrive(uploadUrl, token, manifestJson,
+            onSuccess = { if (cont.isActive) cont.resumeWith(Result.success(true)) },
+            onError = { if (cont.isActive) cont.resumeWith(Result.success(false)) }
+        )
+    }
+

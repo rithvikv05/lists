@@ -38,18 +38,28 @@ class DriveSyncManager(val context: Any? = null) {
     var autoSyncEnabled: Boolean = true
     var wifiOnlySync: Boolean = false
 
+    private val syncMutex = kotlinx.coroutines.sync.Mutex()
+
     suspend fun syncNow(account: GoogleSignInAccount? = null, repository: AppRepository? = null): SyncResult {
-        _syncStatus.value = SyncStatus.Syncing
-        val success = GoogleDriveSync.syncNow()
-        val now = currentTimeMillis()
-        return if (success) {
-            lastSyncTimestamp = now
-            _syncStatus.value = SyncStatus.Success(now)
-            SyncResult.Success
-        } else {
-            val err = "Sync failed. Check connection or sign in again."
-            _syncStatus.value = SyncStatus.Error(err)
-            SyncResult.Error(err)
+        if (!syncMutex.tryLock()) {
+            println("Web DriveSyncManager: Sync already in progress, skipping")
+            return SyncResult.Success
+        }
+        return try {
+            _syncStatus.value = SyncStatus.Syncing
+            val success = GoogleDriveSync.syncNow()
+            val now = currentTimeMillis()
+            if (success) {
+                lastSyncTimestamp = now
+                _syncStatus.value = SyncStatus.Success(now)
+                SyncResult.Success
+            } else {
+                val err = "Sync failed. Check connection or sign in again."
+                _syncStatus.value = SyncStatus.Error(err)
+                SyncResult.Error(err)
+            }
+        } finally {
+            syncMutex.unlock()
         }
     }
 

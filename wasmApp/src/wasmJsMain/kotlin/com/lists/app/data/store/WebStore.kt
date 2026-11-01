@@ -251,63 +251,267 @@ object WebStore {
         }
     }
 
+    // ==================== BACKUP SAFETY NET ====================
+
+    private const val MAX_AUTO_BACKUPS = 3
+    private const val BACKUP_INDEX_KEY = "lists_backup_index"
+    private const val PRESYNC_BACKUP_KEY = "lists_presync_backup"
+
+    /**
+     * Save an automatic backup snapshot with a timestamp.
+     * Keeps a rolling window of MAX_AUTO_BACKUPS.
+     */
+    fun saveAutoBackup() {
+        try {
+            val backup = createBackup()
+            // Don't save empty backups
+            if (backup.lists.isEmpty() && backup.items.isEmpty()) return
+
+            val now = currentTimeMillis()
+            val backupJson = json.encodeToString(backup)
+            val slotIndex = getNextBackupSlot()
+            val key = "lists_auto_backup_$slotIndex"
+            localStorage[key] = backupJson
+            localStorage["${key}_timestamp"] = now.toString()
+            localStorage["${key}_count"] = "${backup.lists.size}L/${backup.items.size}I"
+            localStorage[BACKUP_INDEX_KEY] = ((slotIndex + 1) % MAX_AUTO_BACKUPS).toString()
+            println("Auto-backup saved to slot $slotIndex (${backup.lists.size} lists, ${backup.items.size} items)")
+        } catch (e: Exception) {
+            println("Auto-backup failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Save a pre-sync snapshot — called right before mergeFromRemote.
+     * This is the most important safety net.
+     */
+    fun savePreSyncBackup() {
+        try {
+            val backup = createBackup()
+            if (backup.lists.isEmpty() && backup.items.isEmpty()) return
+
+            val backupJson = json.encodeToString(backup)
+            localStorage[PRESYNC_BACKUP_KEY] = backupJson
+            localStorage["${PRESYNC_BACKUP_KEY}_timestamp"] = currentTimeMillis().toString()
+            localStorage["${PRESYNC_BACKUP_KEY}_count"] = "${backup.lists.size}L/${backup.items.size}I"
+            println("Pre-sync backup saved (${backup.lists.size} lists, ${backup.items.size} items)")
+        } catch (e: Exception) {
+            println("Pre-sync backup failed: ${e.message}")
+        }
+    }
+
+    private fun getNextBackupSlot(): Int {
+        return localStorage[BACKUP_INDEX_KEY]?.toIntOrNull() ?: 0
+    }
+
+    /**
+     * Data class representing an available backup.
+     */
+    data class BackupInfo(
+        val key: String,
+        val label: String,
+        val timestamp: Long,
+        val summary: String
+    )
+
+    /**
+     * Get list of available backups for recovery.
+     */
+    fun getAvailableBackups(): List<BackupInfo> {
+        val backups = mutableListOf<BackupInfo>()
+
+        // Pre-sync backup
+        val presyncJson = localStorage[PRESYNC_BACKUP_KEY]
+        if (!presyncJson.isNullOrEmpty()) {
+            val ts = localStorage["${PRESYNC_BACKUP_KEY}_timestamp"]?.toLongOrNull() ?: 0L
+            val count = localStorage["${PRESYNC_BACKUP_KEY}_count"] ?: "?"
+            backups.add(BackupInfo(
+                key = PRESYNC_BACKUP_KEY,
+                label = "Pre-sync backup",
+                timestamp = ts,
+                summary = count
+            ))
+        }
+
+        // Rolling auto-backups
+        for (i in 0 until MAX_AUTO_BACKUPS) {
+            val key = "lists_auto_backup_$i"
+            val backupJson = localStorage[key]
+            if (!backupJson.isNullOrEmpty()) {
+                val ts = localStorage["${key}_timestamp"]?.toLongOrNull() ?: 0L
+                val count = localStorage["${key}_count"] ?: "?"
+                backups.add(BackupInfo(
+                    key = key,
+                    label = "Auto-backup #${i + 1}",
+                    timestamp = ts,
+                    summary = count
+                ))
+            }
+        }
+
+        return backups.sortedByDescending { it.timestamp }
+    }
+
+    /**
+     * Restore from a specific backup by key.
+     */
+    fun restoreFromBackup(key: String): Boolean {
+        return try {
+            val backupJson = localStorage[key] ?: return false
+            val backup = json.decodeFromString<BackupData>(backupJson)
+            if (backup.lists.isEmpty() && backup.items.isEmpty()) {
+                println("Restore skipped: backup is empty")
+                return false
+            }
+            // Save current state as a safety backup before restoring
+            saveAutoBackup()
+
+            _lists.value = backup.lists
+            _items.value = backup.items
+            _tombstones.value = backup.tombstones
+            saveToStorage()
+            println("Restored from $key (${backup.lists.size} lists, ${backup.items.size} items)")
+            true
+        } catch (e: Exception) {
+            println("Restore from backup failed: ${e.message}")
+            false
+        }
+    }
+
+    // ==================== MERGE ====================
+
     fun mergeFromRemote(remoteBackup: BackupData): BackupData {
+        // Safety: save pre-sync backup before any merge
+        savePreSyncBackup()
+
         val now = currentTimeMillis()
 
-        // 1. Merge tombstones
-        val combinedTombstones = (_tombstones.value + remoteBackup.tombstones)
-            .distinctBy { it.entityUuid }
+        // 1. Process tombstones with timestamps
+        val tombstoneMap = mutableMapOf<String, Long>()
+        for (t in _tombstones.value) {
+            tombstoneMap[t.entityUuid] = maxOf(tombstoneMap[t.entityUuid] ?: 0L, t.deletedAt)
+        }
+        for (t in remoteBackup.tombstones) {
+            tombstoneMap[t.entityUuid] = maxOf(tombstoneMap[t.entityUuid] ?: 0L, t.deletedAt)
+        }
 
-        val deletedListUuids = combinedTombstones.filter { it.entityType == "LIST" }.map { it.entityUuid }.toSet()
-        val deletedItemUuids = combinedTombstones.filter { it.entityType == "ITEM" }.map { it.entityUuid }.toSet()
-
-        // 2. Reconcile Lists
-        val localLists = _lists.value.filterNot { it.uuid in deletedListUuids }
-        val remoteLists = remoteBackup.lists.filterNot { it.uuid in deletedListUuids }
+        // 2. Reconcile Lists: only delete if tombstone deletedAt >= list.updatedAt
+        val localLists = _lists.value.filterNot { list ->
+            val deletedAt = tombstoneMap[list.uuid]
+            deletedAt != null && deletedAt >= list.updatedAt
+        }
+        val remoteLists = remoteBackup.lists.filterNot { list ->
+            val deletedAt = tombstoneMap[list.uuid]
+            deletedAt != null && deletedAt >= list.updatedAt
+        }
 
         val mergedListsMap = mutableMapOf<String, UserList>()
-        for (l in localLists) {
-            val key = "${l.name.trim().lowercase()}_${l.category}"
-            mergedListsMap[key] = l
+        val uuidToLocalList = mutableMapOf<String, UserList>()
+        val remoteIdToLocalList = mutableMapOf<Long, UserList>()
+
+        for (local in localLists) {
+            mergedListsMap[local.uuid] = local
+            uuidToLocalList[local.uuid] = local
         }
-        for (rl in remoteLists) {
-            val key = "${rl.name.trim().lowercase()}_${rl.category}"
-            val existing = mergedListsMap[key]
-            if (existing == null) {
-                mergedListsMap[key] = rl
+
+        for (remote in remoteLists) {
+            val existingByUuid = mergedListsMap[remote.uuid]
+            if (existingByUuid != null) {
+                if (remote.updatedAt > existingByUuid.updatedAt) {
+                    val updated = remote.copy(id = existingByUuid.id)
+                    mergedListsMap[remote.uuid] = updated
+                    uuidToLocalList[remote.uuid] = updated
+                }
             } else {
-                if (rl.updatedAt > existing.updatedAt) {
-                    mergedListsMap[key] = rl.copy(id = existing.id)
+                val existingByNameCat = mergedListsMap.values.firstOrNull {
+                    it.category == remote.category && it.name.trim().equals(remote.name.trim(), ignoreCase = true)
+                }
+                if (existingByNameCat != null) {
+                    val adopted = existingByNameCat.copy(
+                        uuid = remote.uuid,
+                        updatedAt = maxOf(existingByNameCat.updatedAt, remote.updatedAt)
+                    )
+                    mergedListsMap.remove(existingByNameCat.uuid)
+                    mergedListsMap[remote.uuid] = adopted
+                    uuidToLocalList[remote.uuid] = adopted
+                    uuidToLocalList[existingByNameCat.uuid] = adopted
+                    remoteIdToLocalList[remote.id] = adopted
+                } else {
+                    mergedListsMap[remote.uuid] = remote
+                    uuidToLocalList[remote.uuid] = remote
+                    remoteIdToLocalList[remote.id] = remote
                 }
             }
         }
-        val finalLists = mergedListsMap.values.toList()
+        // Guarantee every list has a unique, positive ID for Compose keys and navigation
+        val assignedListMap = mutableMapOf<String, Long>()
+        var nextListId = 1L
+        val finalLists = mergedListsMap.values.map { list ->
+            val assignedId = nextListId++
+            assignedListMap[list.uuid] = assignedId
+            list.copy(id = assignedId)
+        }
 
-        // 3. Reconcile Items
-        val localItems = _items.value.filterNot { it.uuid in deletedItemUuids }
-        val remoteItems = remoteBackup.items.filterNot { it.uuid in deletedItemUuids }
+        // 3. Reconcile Items: only delete if tombstone deletedAt >= item.updatedAt
+        val localItems = _items.value.filterNot { item ->
+            val deletedAt = tombstoneMap[item.uuid]
+            deletedAt != null && deletedAt >= item.updatedAt
+        }
+        val remoteItems = remoteBackup.items.filterNot { item ->
+            val deletedAt = tombstoneMap[item.uuid]
+            deletedAt != null && deletedAt >= item.updatedAt
+        }
 
         val mergedItemsMap = mutableMapOf<String, ListItem>()
         for (item in localItems) {
-            mergedItemsMap[item.uuid] = item
+            val assignedListId = assignedListMap[item.listUuid] ?: item.listId
+            mergedItemsMap[item.uuid] = item.copy(listId = assignedListId)
         }
         for (ri in remoteItems) {
+            val targetList = uuidToLocalList[ri.listUuid]
+                ?: remoteIdToLocalList[ri.listId]
+                ?: finalLists.firstOrNull { it.id == ri.listId }
+                ?: finalLists.firstOrNull { it.category == ri.category }
+                ?: finalLists.firstOrNull()
+
+            val assignedListId = targetList?.let { assignedListMap[it.uuid] ?: it.id } ?: ri.listId
+            val remappedListUuid = targetList?.uuid ?: ri.listUuid
+            val remapped = ri.copy(listId = assignedListId, listUuid = remappedListUuid)
+
             val existing = mergedItemsMap[ri.uuid]
             if (existing == null) {
-                mergedItemsMap[ri.uuid] = ri
+                mergedItemsMap[ri.uuid] = remapped
             } else {
                 if (ri.updatedAt > existing.updatedAt) {
-                    mergedItemsMap[ri.uuid] = ri.copy(id = existing.id)
+                    mergedItemsMap[ri.uuid] = remapped.copy(id = existing.id)
                 }
             }
         }
-        val finalItems = mergedItemsMap.values.toList()
+
+        // Guarantee every item has a unique, positive ID for Compose keys and navigation
+        var nextItemId = 1L
+        val finalItems = mergedItemsMap.values.map { item ->
+            item.copy(id = nextItemId++)
+        }
+
+        val combinedTombstones = tombstoneMap.map { (uuid, ts) ->
+            val existing = _tombstones.value.firstOrNull { it.entityUuid == uuid }
+                ?: remoteBackup.tombstones.firstOrNull { it.entityUuid == uuid }
+            Tombstone(
+                entityUuid = uuid,
+                entityType = existing?.entityType ?: "ITEM",
+                deletedAt = ts
+            )
+        }
 
         _lists.value = finalLists
         _items.value = finalItems
         _tombstones.value = combinedTombstones
         _lastSyncTime.value = now
         saveToStorage()
+
+        // Save an auto-backup of the successful merge result
+        saveAutoBackup()
 
         return BackupData(
             version = 1,

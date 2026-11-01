@@ -69,10 +69,40 @@ fun ListsScreen(
     val syncManager = remember { com.lists.app.data.sync.DriveSyncManager(context) }
     val signInHelper = remember { com.lists.app.data.sync.GoogleSignInHelper(context) }
     val syncStatus by com.lists.app.data.sync.DriveSyncManager.syncStatus.collectAsState()
-    var signedInAccount by remember { mutableStateOf(signInHelper.getSignedInAccount()) }
+    val userEmail by com.lists.app.data.store.WebStore.userEmail.collectAsState()
+    val signedInAccount = userEmail?.let { com.lists.app.data.sync.GoogleSignInAccount(it, it) }
 
-    LaunchedEffect(Unit) {
-        signedInAccount = signInHelper.getSignedInAccount()
+    // Auto-sync on screen load or whenever user account becomes available
+    LaunchedEffect(signedInAccount) {
+        val account = signedInAccount ?: return@LaunchedEffect
+        println("Auto-sync: Account connected, triggering sync...")
+        syncManager.syncNow(account, repository)
+    }
+
+    // Auto-sync when window gains focus (user switches back to tab)
+    LaunchedEffect(signedInAccount) {
+        val account = signedInAccount ?: return@LaunchedEffect
+        kotlinx.browser.window.onfocus = {
+            if (syncStatus !is com.lists.app.data.sync.DriveSyncManager.SyncStatus.Syncing) {
+                scope.launch {
+                    println("Auto-sync: Window focused, syncing...")
+                    syncManager.syncNow(account, repository)
+                }
+            }
+            Unit
+        }
+    }
+
+    // Periodic sync every 30 seconds when signed in
+    LaunchedEffect(signedInAccount) {
+        val account = signedInAccount ?: return@LaunchedEffect
+        while (true) {
+            kotlinx.coroutines.delay(30_000L)
+            if (syncStatus !is com.lists.app.data.sync.DriveSyncManager.SyncStatus.Syncing) {
+                println("Auto-sync: Periodic sync triggered")
+                syncManager.syncNow(account, repository)
+            }
+        }
     }
 
     LaunchedEffect(listsWithStats) {
@@ -257,7 +287,7 @@ fun ListsScreen(
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                items(localLists, key = { it.list.id }) { item ->
+                items(localLists, key = { it.list.uuid.ifEmpty { "${it.list.name}_${it.list.id}" } }) { item ->
                     val isDraggingThis = draggingListId == item.list.id
                     val isHoverTarget = hoverTargetListId == item.list.id && draggingListId != item.list.id
 

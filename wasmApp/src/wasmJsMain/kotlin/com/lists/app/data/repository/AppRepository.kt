@@ -36,17 +36,21 @@ class AppRepository(val context: Any? = null) {
     fun getList(id: Long): Flow<UserList?> = WebStore.lists.map { it.firstOrNull { l -> l.id == id } }
     suspend fun getListSync(id: Long): UserList? = WebStore.lists.value.firstOrNull { it.id == id }
 
-    fun getItems(listId: Long): Flow<List<ListItem>> = WebStore.items.map {
-        it.filter { item -> item.listId == listId }
+    fun getItems(listId: Long): Flow<List<ListItem>> = combine(WebStore.lists, WebStore.items) { lists, items ->
+        val parent = lists.firstOrNull { it.id == listId }
+        val parentUuid = parent?.uuid ?: ""
+        items.filter { item -> item.listId == listId || (parentUuid.isNotEmpty() && item.listUuid == parentUuid) }
     }
 
     fun getItem(id: Long): Flow<ListItem?> = WebStore.items.map { it.firstOrNull { item -> item.id == id } }
     suspend fun getItemSync(id: Long): ListItem? = WebStore.items.value.firstOrNull { it.id == id }
 
-    fun getPreviewCovers(listId: Long): Flow<List<String>> = WebStore.items.map {
-        it.filter { item -> item.listId == listId && item.coverUrl.isNotBlank() }
-            .map { it.coverUrl }
-            .take(4)
+    fun getPreviewCovers(listId: Long): Flow<List<String>> = combine(WebStore.lists, WebStore.items) { lists, items ->
+        val parent = lists.firstOrNull { it.id == listId }
+        val parentUuid = parent?.uuid ?: ""
+        items.filter { item ->
+            (item.listId == listId || (parentUuid.isNotEmpty() && item.listUuid == parentUuid)) && item.coverUrl.isNotBlank()
+        }.map { it.coverUrl }.take(4)
     }
 
     suspend fun createList(

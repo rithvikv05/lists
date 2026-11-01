@@ -399,7 +399,7 @@ fun ListDetailScreen(
                                 ListEmptyState(searchQuery = searchQuery, category = category)
                             }
                         } else {
-                            items(filteredItems, key = { it.id }) { item ->
+                            items(filteredItems, key = { it.uuid.ifEmpty { "${it.listId}_${it.title}_${it.id}" } }) { item ->
                                 ItemGridCard(
                                     item = item,
                                     category = category,
@@ -441,7 +441,7 @@ fun ListDetailScreen(
                                 ListEmptyState(searchQuery = searchQuery, category = category)
                             }
                         } else {
-                            items(filteredItems, key = { it.id }) { item ->
+                            items(filteredItems, key = { it.uuid.ifEmpty { "${it.listId}_${it.title}_${it.id}" } }) { item ->
                                 ItemGridCard(
                                     item = item,
                                     category = category,
@@ -484,7 +484,7 @@ fun ListDetailScreen(
                                 ListEmptyState(searchQuery = searchQuery, category = category)
                             }
                         } else {
-                            items(filteredItems, key = { it.id }) { item ->
+                            items(filteredItems, key = { it.uuid.ifEmpty { "${it.listId}_${it.title}_${it.id}" } }) { item ->
                                 ItemListRow(
                                     item = item,
                                     category = category,
