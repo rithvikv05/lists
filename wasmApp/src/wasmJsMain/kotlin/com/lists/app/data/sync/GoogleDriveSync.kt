@@ -16,7 +16,7 @@ import org.w3c.dom.get
 import org.w3c.dom.set
 
 object GoogleDriveSync {
-    private const val CLIENT_ID = "112735802916-8cpc9959u76m3mj578rcouj3ng17kero.apps.googleusercontent.com"
+    private const val CLIENT_ID = "112735802916-9b4qf1e1ru2h5gaeh184lek7uf84on5e.apps.googleusercontent.com"
     private const val SCOPES = "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email"
     private val client = HttpClient()
     private val json = Json { ignoreUnknownKeys = true }
