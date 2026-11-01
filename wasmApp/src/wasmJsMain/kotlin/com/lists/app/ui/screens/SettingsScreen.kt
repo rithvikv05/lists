@@ -9,8 +9,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,12 +23,10 @@ import androidx.compose.ui.unit.sp
 import com.lists.app.data.model.Category
 import com.lists.app.data.model.RatingScaleOption
 import com.lists.app.data.store.WebStore
+import com.lists.app.data.sync.GoogleDriveSync
 import com.lists.app.ui.theme.*
-import kotlinx.browser.document
-import kotlinx.browser.window
-import org.w3c.dom.HTMLAnchorElement
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
@@ -37,222 +35,340 @@ fun SettingsScreen(
 ) {
     val userEmail by WebStore.userEmail.collectAsState()
     val isSyncing by WebStore.syncing.collectAsState()
+    val lastSyncTime by WebStore.lastSyncTime.collectAsState()
     val ratingPrefs by WebStore.ratingPrefs.collectAsState()
 
     var showRestoreDialog by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
 
     Scaffold(
+        containerColor = PureBlack,
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "Settings",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextWhite
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = TextWhite
                     )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = TextWhite
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = PureBlack)
-            )
-        },
-        containerColor = PureBlack
-    ) { innerPadding ->
-        Column(
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Text(
+                    text = "Settings",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextWhite
+                )
+            }
+        }
+    ) { padding ->
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+                .padding(padding)
         ) {
-            // Google Drive Card
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkCardBg),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Text(
-                        text = "Google Drive Sync",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextWhite
-                    )
-
-                    if (userEmail != null) {
-                        Text(
-                            text = "Connected as: $userEmail",
-                            fontSize = 13.sp,
-                            color = TextGrayLight
-                        )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Button(
-                                onClick = onSyncNow,
-                                enabled = !isSyncing,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = TextWhite,
-                                    contentColor = PureBlack
-                                )
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(if (isSyncing) "Syncing..." else "Sync Now")
-                            }
-
-                            TextButton(
-                                onClick = { WebStore.setAuth(null) }
-                            ) {
-                                Text("Disconnect", color = Color(0xFFFF453A))
-                            }
-                        }
-                    } else {
-                        Text(
-                            text = "Sign in to backup and seamlessly sync your lists across mobile and web with zero data loss.",
-                            fontSize = 13.sp,
-                            color = TextGrayMedium,
-                            lineHeight = 18.sp
-                        )
-
-                        Button(
-                            onClick = onConnectDrive,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = TextWhite,
-                                contentColor = PureBlack
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Connect Google Drive", fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
+            val horizontalPadding = if (maxWidth >= 840.dp) {
+                ((maxWidth - 740.dp) / 2).coerceAtLeast(20.dp)
+            } else {
+                20.dp
             }
 
-            // Rating Scales Section
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkCardBg),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = horizontalPadding, vertical = 16.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Text(
-                        text = "Rating Scale Preferences",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextWhite
-                    )
+                // RATING SYSTEMS SECTION
+                Text(
+                    text = "RATING SYSTEMS",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = TextSecondary
+                )
 
-                    Category.entries.forEach { cat ->
-                        val currentScale = WebStore.getRatingScale(cat)
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "${cat.displayName} Scale",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextGrayLight
-                            )
+                Spacer(modifier = Modifier.height(12.dp))
 
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.fillMaxWidth()
+                // 4 Categories in clean single-line rows with dropdowns
+                Category.entries.forEach { cat ->
+                    val currentScale = WebStore.getRatingScale(cat)
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = cat.displayName,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = TextWhite
+                        )
+
+                        Box {
+                            var dropdownExpanded by remember { mutableStateOf(false) }
+
+                            Surface(
+                                color = DarkCardElevated,
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(0.5.dp, DarkBorder),
+                                modifier = Modifier.clickable { dropdownExpanded = true }
                             ) {
-                                RatingScaleOption.entries.forEach { opt ->
-                                    val isSelected = currentScale == opt
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (isSelected) AccentWhite else DarkCardElevated)
-                                            .clickable { WebStore.setRatingScale(cat, opt) }
-                                            .padding(vertical = 8.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = opt.shortName,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isSelected) PureBlack else TextWhite
-                                        )
-                                    }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = currentScale.shortName,
+                                        fontSize = 12.sp,
+                                        color = TextWhite,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+
+                            DropdownMenu(
+                                expanded = dropdownExpanded,
+                                onDismissRequest = { dropdownExpanded = false },
+                                modifier = Modifier
+                                    .background(DarkCardElevated)
+                                    .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
+                            ) {
+                                RatingScaleOption.entries.forEach { option ->
+                                    val isSelected = currentScale == option
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = option.displayName,
+                                                color = if (isSelected) TextWhite else TextSecondary,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                fontSize = 13.sp
+                                            )
+                                        },
+                                        onClick = {
+                                            WebStore.setRatingScale(cat, option)
+                                            dropdownExpanded = false
+                                        }
+                                    )
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            // Data Export / Import Card
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DarkCardBg),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                Spacer(modifier = Modifier.height(28.dp))
+                HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // GOOGLE DRIVE SYNC SECTION
+                Text(
+                    text = "GOOGLE DRIVE SYNC",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = TextSecondary
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Sync Card
+                Surface(
+                    color = DarkCardElevated,
+                    shape = RoundedCornerShape(14.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = "Backup & Restore",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextWhite
-                    )
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        if (userEmail == null) {
+                            // Signed out state
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CloudSync,
+                                    contentDescription = null,
+                                    tint = TextWhite,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Google Drive",
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = TextWhite
+                                    )
+                                    Text(
+                                        text = "Not connected",
+                                        fontSize = 12.sp,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(
-                            onClick = {
-                                val jsonStr = WebStore.exportBackupJson()
-                                jsDownloadFile("listy_backup.json", jsonStr)
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = DarkCardElevated,
-                                contentColor = TextWhite
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Export JSON")
-                        }
+                            Spacer(modifier = Modifier.height(14.dp))
 
-                        Button(
-                            onClick = { showRestoreDialog = true },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = DarkCardElevated,
-                                contentColor = TextWhite
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Restore JSON")
+                            Button(
+                                onClick = onConnectDrive,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(46.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = TextWhite,
+                                    contentColor = PureBlack
+                                )
+                            ) {
+                                Text(
+                                    text = "Sign In with Google",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            // Signed in state
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(RoundedCornerShape(5.dp))
+                                            .background(Color(0xFF34C759))
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = userEmail ?: "Connected",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = TextWhite,
+                                            maxLines = 1
+                                        )
+                                        Text(
+                                            text = if (lastSyncTime != null && lastSyncTime!! > 0L) "Last synced: Just now" else "Sync ready",
+                                            fontSize = 11.sp,
+                                            color = TextSecondary
+                                        )
+                                    }
+                                }
+
+                                TextButton(
+                                    onClick = {
+                                        WebStore.setAuth(null)
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "Sign Out",
+                                        color = TextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Sync Now button
+                            Button(
+                                onClick = onSyncNow,
+                                enabled = !isSyncing,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(46.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = TextWhite,
+                                    contentColor = PureBlack,
+                                    disabledContainerColor = DarkBorder,
+                                    disabledContentColor = TextSecondary
+                                )
+                            ) {
+                                if (isSyncing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = PureBlack
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Syncing...", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Sync,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = PureBlack
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Sync Now",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(28.dp))
+                HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // BACKUP & RESTORE SECTION
+                Text(
+                    text = "BACKUP & RESTORE",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = TextSecondary
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = {
+                            val jsonStr = WebStore.exportBackupJson()
+                            jsDownloadFile("listy_backup.json", jsonStr)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DarkCardElevated,
+                            contentColor = TextWhite
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Export JSON")
+                    }
+
+                    Button(
+                        onClick = { showRestoreDialog = true },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DarkCardElevated,
+                            contentColor = TextWhite
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Restore JSON")
                     }
                 }
             }

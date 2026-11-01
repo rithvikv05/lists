@@ -15,8 +15,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.lists.app.data.model.*
 import com.lists.app.data.store.WebStore
 import com.lists.app.ui.components.ItemGridCard
+import com.lists.app.ui.components.ItemListRow
 import com.lists.app.ui.icons.ListyIcons
 import com.lists.app.ui.theme.*
 
@@ -86,7 +89,6 @@ fun ListDetailScreen(
             FilterOption.PINNED -> searchFiltered.filter { it.pinned }
         }
 
-        // Pinned items always float to the top
         statusFiltered.sortedWith { a, b ->
             if (a.pinned != b.pinned) {
                 b.pinned.compareTo(a.pinned)
@@ -108,6 +110,7 @@ fun ListDetailScreen(
     }
 
     Scaffold(
+        containerColor = PureBlack,
         topBar = {
             TopAppBar(
                 title = {
@@ -115,7 +118,7 @@ fun ListDetailScreen(
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            placeholder = { Text("Filter items...", color = TextGrayMedium) },
+                            placeholder = { Text("Filter in ${userList.name}...", color = TextGrayMedium) },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = TextWhite,
@@ -151,6 +154,28 @@ fun ListDetailScreen(
                     }
                 },
                 actions = {
+                    // View Mode Switcher
+                    IconButton(onClick = {
+                        val nextMode = when (currentViewMode) {
+                            ViewMode.GRID_2 -> ViewMode.GRID_3
+                            ViewMode.GRID_3 -> ViewMode.LIST
+                            ViewMode.LIST -> ViewMode.GRID_2
+                        }
+                        currentViewMode = nextMode
+                        WebStore.updateList(userList.copy(viewMode = nextMode.name))
+                    }) {
+                        Icon(
+                            imageVector = when (currentViewMode) {
+                                ViewMode.GRID_2 -> Icons.Default.GridView
+                                ViewMode.GRID_3 -> Icons.Default.GridOn
+                                ViewMode.LIST -> Icons.Default.ViewAgenda
+                            },
+                            contentDescription = "View Mode",
+                            tint = TextWhite
+                        )
+                    }
+
+                    // Search button
                     IconButton(onClick = { isSearching = !isSearching }) {
                         Icon(
                             imageVector = Icons.Default.Search,
@@ -158,6 +183,8 @@ fun ListDetailScreen(
                             tint = if (isSearching) AccentWhite else TextGrayMedium
                         )
                     }
+
+                    // Filter & Sort button
                     IconButton(onClick = { showFilterSortSheet = true }) {
                         Icon(
                             imageVector = ListyIcons.Filter,
@@ -185,20 +212,28 @@ fun ListDetailScreen(
                     modifier = Modifier.size(24.dp)
                 )
             }
-        },
-        containerColor = PureBlack
+        }
     ) { innerPadding ->
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            val columns = when {
-                maxWidth >= 1400.dp -> 6
-                maxWidth >= 1100.dp -> 5
-                maxWidth >= 800.dp -> 4
-                maxWidth >= 500.dp -> 3
-                else -> 2
+            val isTablet = maxWidth >= 800.dp
+            val isDesktop = maxWidth >= 1200.dp
+
+            val columns = when (currentViewMode) {
+                ViewMode.GRID_2 -> when {
+                    isDesktop -> 5
+                    isTablet -> 4
+                    else -> 2
+                }
+                ViewMode.GRID_3 -> when {
+                    isDesktop -> 7
+                    isTablet -> 5
+                    else -> 3
+                }
+                ViewMode.LIST -> 1
             }
 
             if (filteredItems.isEmpty()) {
@@ -212,12 +247,43 @@ fun ListDetailScreen(
                         fontSize = 15.sp
                     )
                 }
+            } else if (currentViewMode == ViewMode.LIST) {
+                val horizontalPadding = if (maxWidth >= 760.dp) {
+                    ((maxWidth - 720.dp) / 2).coerceAtLeast(16.dp)
+                } else {
+                    16.dp
+                }
+                LazyColumn(
+                    contentPadding = PaddingValues(start = horizontalPadding, end = horizontalPadding, top = 8.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(filteredItems, key = { it.uuid }) { item ->
+                        ItemListRow(
+                            item = item,
+                            category = category,
+                            activeScale = activeScale,
+                            onClick = { onOpenItem(item) },
+                            onToggleMarked = {
+                                val newMarked = !item.marked
+                                val newStatus = if (newMarked) ItemStatus.COMPLETED else ItemStatus.BACKLOG
+                                WebStore.updateItem(
+                                    item.copy(
+                                        marked = newMarked,
+                                        markedAt = if (newMarked) currentTimeMillis() else null,
+                                        status = newStatus
+                                    )
+                                )
+                            }
+                        )
+                    }
+                }
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(columns),
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(filteredItems, key = { it.uuid }) { item ->
@@ -244,7 +310,7 @@ fun ListDetailScreen(
         }
     }
 
-    // Filter & Sort Bottom Sheet / Modal
+    // Filter & Sort Bottom Sheet / Modal matching com.lists.app
     if (showFilterSortSheet) {
         AlertDialog(
             onDismissRequest = { showFilterSortSheet = false },
