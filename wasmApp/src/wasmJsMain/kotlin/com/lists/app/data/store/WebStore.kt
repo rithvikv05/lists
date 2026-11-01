@@ -96,7 +96,7 @@ object WebStore {
     }
 
     private fun createDefaultLists() {
-        val now = (window.performance.now() + 1700000000000.0).toLong()
+        val now = currentTimeMillis()
         val defaultLists = listOf(
             UserList(id = 1, uuid = generateUuid(), name = "Movies to Watch", category = "MOVIE", createdAt = now, updatedAt = now),
             UserList(id = 2, uuid = generateUuid(), name = "TV Shows", category = "TV_SHOW", createdAt = now, updatedAt = now),
@@ -108,7 +108,7 @@ object WebStore {
     }
 
     fun addList(name: String, category: Category): UserList {
-        val now = (window.performance.now() + 1700000000000.0).toLong()
+        val now = currentTimeMillis()
         val maxId = _lists.value.maxOfOrNull { it.id } ?: 0L
         val newList = UserList(
             id = maxId + 1,
@@ -124,14 +124,14 @@ object WebStore {
     }
 
     fun updateList(list: UserList) {
-        val now = (window.performance.now() + 1700000000000.0).toLong()
+        val now = currentTimeMillis()
         val updated = list.copy(updatedAt = now)
         _lists.value = _lists.value.map { if (it.id == list.id || it.uuid == list.uuid) updated else it }
         saveToStorage()
     }
 
     fun deleteList(list: UserList) {
-        val now = (window.performance.now() + 1700000000000.0).toLong()
+        val now = currentTimeMillis()
         _lists.value = _lists.value.filterNot { it.id == list.id || it.uuid == list.uuid }
         // Also delete items in this list
         val deletedItems = _items.value.filter { it.listId == list.id || it.listUuid == list.uuid }
@@ -147,7 +147,7 @@ object WebStore {
     }
 
     fun addItem(item: ListItem) {
-        val now = (window.performance.now() + 1700000000000.0).toLong()
+        val now = currentTimeMillis()
         val maxId = _items.value.maxOfOrNull { it.id } ?: 0L
         val newItem = item.copy(
             id = maxId + 1,
@@ -160,14 +160,14 @@ object WebStore {
     }
 
     fun updateItem(item: ListItem) {
-        val now = (window.performance.now() + 1700000000000.0).toLong()
+        val now = currentTimeMillis()
         val updated = item.copy(updatedAt = now)
         _items.value = _items.value.map { if (it.id == item.id || it.uuid == item.uuid) updated else it }
         saveToStorage()
     }
 
     fun deleteItem(item: ListItem) {
-        val now = (window.performance.now() + 1700000000000.0).toLong()
+        val now = currentTimeMillis()
         _items.value = _items.value.filterNot { it.id == item.id || it.uuid == item.uuid }
         val newTombstones = _tombstones.value.toMutableList()
         newTombstones.add(Tombstone(entityUuid = item.uuid, entityType = "ITEM", deletedAt = now))
@@ -176,7 +176,7 @@ object WebStore {
     }
 
     fun clearCompletedItems(listId: Long, listUuid: String) {
-        val now = (window.performance.now() + 1700000000000.0).toLong()
+        val now = currentTimeMillis()
         val toDelete = _items.value.filter {
             (it.listId == listId || (listUuid.isNotEmpty() && it.listUuid == listUuid)) && (it.marked || it.status == ItemStatus.COMPLETED)
         }
@@ -204,7 +204,7 @@ object WebStore {
     }
 
     fun exportBackupJson(): String {
-        val now = (window.performance.now() + 1700000000000.0).toLong()
+        val now = currentTimeMillis()
         val backup = BackupData(
             version = 1,
             exportedAt = now,
@@ -230,7 +230,7 @@ object WebStore {
     }
 
     fun mergeFromRemote(remoteBackup: BackupData): BackupData {
-        val now = (window.performance.now() + 1700000000000.0).toLong()
+        val now = currentTimeMillis()
 
         // 1. Merge tombstones
         val combinedTombstones = (_tombstones.value + remoteBackup.tombstones)

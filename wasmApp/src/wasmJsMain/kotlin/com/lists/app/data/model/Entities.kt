@@ -8,6 +8,9 @@ fun generateUuid(): String {
     return (1..32).map { chars[Random.nextInt(chars.length)] }.chunked(4).joinToString("-") { it.joinToString("") }
 }
 
+private fun jsDateNow(): Double = js("Date.now()")
+fun currentTimeMillis(): Long = jsDateNow().toLong()
+
 @Serializable
 data class UserList(
     val id: Long = 0,

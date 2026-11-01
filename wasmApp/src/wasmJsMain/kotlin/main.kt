@@ -27,10 +27,23 @@ sealed class Screen {
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
-    WebStore.init()
-    GoogleDriveSync.init()
+    try {
+        WebStore.init()
+    } catch (e: Throwable) {
+        println("WebStore.init error: ${e.message}")
+    }
+    try {
+        GoogleDriveSync.init()
+    } catch (e: Throwable) {
+        println("GoogleDriveSync.init error: ${e.message}")
+    }
 
-    ComposeViewport(document.body!!) {
+    val body = document.body ?: run {
+        println("ERROR: document.body is null")
+        return
+    }
+
+    ComposeViewport(body) {
         ListyTheme {
             var currentScreen by remember { mutableStateOf<Screen>(Screen.Lists) }
             val coroutineScope = rememberCoroutineScope()

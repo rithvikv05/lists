@@ -61,7 +61,7 @@ fun ItemDetailScreen(
                         val newPinned = !currentItem.pinned
                         val updated = currentItem.copy(
                             pinned = newPinned,
-                            pinnedAt = if (newPinned) (kotlinx.browser.window.performance.now() + 1700000000000.0).toLong() else null
+                            pinnedAt = if (newPinned) currentTimeMillis() else null
                         )
                         currentItem = updated
                         WebStore.updateItem(updated)

@@ -232,7 +232,7 @@ fun ListDetailScreen(
                                 WebStore.updateItem(
                                     item.copy(
                                         marked = newMarked,
-                                        markedAt = if (newMarked) (kotlinx.browser.window.performance.now() + 1700000000000.0).toLong() else null,
+                                        markedAt = if (newMarked) currentTimeMillis() else null,
                                         status = newStatus
                                     )
                                 )
