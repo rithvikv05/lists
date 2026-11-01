@@ -16,8 +16,8 @@ class SyncWorker(
 
     companion object {
         private const val TAG = "SyncWorker"
-        private const val UNIQUE_PERIODIC_WORK = "listy_periodic_sync"
-        private const val UNIQUE_ONE_TIME_WORK = "listy_one_time_sync"
+        private const val UNIQUE_PERIODIC_WORK = "lists_periodic_sync"
+        private const val UNIQUE_ONE_TIME_WORK = "lists_one_time_sync"
 
         /**
          * Schedule periodic sync every 6 hours.

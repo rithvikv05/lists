@@ -69,7 +69,18 @@ fun ListDetailScreen(
     val scope = rememberCoroutineScope()
 
     val context = androidx.compose.ui.platform.LocalContext.current
-    val prefs = remember { context.getSharedPreferences("listy_view_prefs", android.content.Context.MODE_PRIVATE) }
+    val prefs = remember {
+        val legacy = context.getSharedPreferences("listy_view_prefs", android.content.Context.MODE_PRIVATE)
+        context.getSharedPreferences("lists_view_prefs", android.content.Context.MODE_PRIVATE).also { newPrefs ->
+            if (newPrefs.all.isEmpty() && legacy.all.isNotEmpty()) {
+                val editor = newPrefs.edit()
+                legacy.all.forEach { (k, v) ->
+                    if (v is String) editor.putString(k, v)
+                }
+                editor.apply()
+            }
+        }
+    }
     var viewMode by remember {
         val saved = prefs.getString("view_mode_$listId", null) ?: prefs.getString("global_view_mode", ViewMode.GRID_2.name)
         mutableStateOf(try { ViewMode.valueOf(saved!!) } catch (_: Exception) { ViewMode.GRID_2 })
@@ -393,8 +404,14 @@ fun ListDetailScreen(
                                     category = category,
                                     activeScale = activeScale,
                                     onClick = { onNavigateToItemDetail(item.id) },
+                                    onTogglePin = {
+                                        scope.launch { repository.toggleItemPinned(item) }
+                                    },
                                     onToggleMarked = {
                                         scope.launch { repository.toggleItemMarked(item) }
+                                    },
+                                    onDelete = {
+                                        scope.launch { repository.deleteItem(item) }
                                     }
                                 )
                             }
@@ -429,8 +446,14 @@ fun ListDetailScreen(
                                     category = category,
                                     activeScale = activeScale,
                                     onClick = { onNavigateToItemDetail(item.id) },
+                                    onTogglePin = {
+                                        scope.launch { repository.toggleItemPinned(item) }
+                                    },
                                     onToggleMarked = {
                                         scope.launch { repository.toggleItemMarked(item) }
+                                    },
+                                    onDelete = {
+                                        scope.launch { repository.deleteItem(item) }
                                     }
                                 )
                             }
@@ -469,8 +492,14 @@ fun ListDetailScreen(
                                     category = category,
                                     activeScale = activeScale,
                                     onClick = { onNavigateToItemDetail(item.id) },
+                                    onTogglePin = {
+                                        scope.launch { repository.toggleItemPinned(item) }
+                                    },
                                     onToggleMarked = {
                                         scope.launch { repository.toggleItemMarked(item) }
+                                    },
+                                    onDelete = {
+                                        scope.launch { repository.deleteItem(item) }
                                     }
                                 )
                             }

@@ -1,31 +1,38 @@
 package com.lists.app.data.model
 
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.lists.app.R
 import kotlinx.serialization.Serializable
 
 @Serializable
 enum class Category(
     val id: String,
     val displayName: String,
+    val iconRes: ImageVector,
     val searchHint: String
 ) {
     MOVIE(
         id = "MOVIE",
         displayName = "Movies",
+        iconRes = R.drawable.ic_type_movie,
         searchHint = "Type a movie title..."
     ),
     TV_SHOW(
         id = "TV_SHOW",
         displayName = "TV Shows",
+        iconRes = R.drawable.ic_type_tv_show,
         searchHint = "Type a TV show or anime..."
     ),
     BOOK(
         id = "BOOK",
         displayName = "Books",
+        iconRes = R.drawable.ic_type_book,
         searchHint = "Type a book or manga..."
     ),
     GAME(
         id = "GAME",
         displayName = "Games",
+        iconRes = R.drawable.ic_type_videogame,
         searchHint = "Type a game title..."
     );
 
@@ -43,7 +50,6 @@ enum class ItemStatus(val displayName: String) {
     COMPLETED("Done")
 }
 
-@Serializable
 enum class SortOption(val displayName: String) {
     DATE_ADDED_DESC("Date Added (Newest)"),
     DATE_ADDED_ASC("Date Added (Oldest)"),
@@ -53,7 +59,6 @@ enum class SortOption(val displayName: String) {
     RELEASE_YEAR_DESC("Release Year")
 }
 
-@Serializable
 enum class FilterOption(val displayName: String) {
     ALL("All"),
     IN_PROGRESS("In Progress"),
@@ -62,14 +67,12 @@ enum class FilterOption(val displayName: String) {
     PINNED("Pinned")
 }
 
-@Serializable
 enum class ViewMode {
     GRID_2,
     GRID_3,
     LIST
 }
 
-@Serializable
 data class SearchResult(
     val title: String,
     val originalTitle: String = "",
@@ -86,7 +89,6 @@ data class SearchResult(
     val totalPages: Int = 0
 )
 
-@Serializable
 enum class RatingScaleOption(
     val id: String,
     val displayName: String,

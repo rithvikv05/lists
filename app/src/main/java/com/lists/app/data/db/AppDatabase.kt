@@ -73,10 +73,22 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
+                val legacyDb = context.getDatabasePath("listy_database.db")
+                val newDb = context.getDatabasePath("lists_database.db")
+                if (legacyDb.exists() && !newDb.exists()) {
+                    try {
+                        legacyDb.renameTo(newDb)
+                        val legacyShm = context.getDatabasePath("listy_database.db-shm")
+                        if (legacyShm.exists()) legacyShm.renameTo(context.getDatabasePath("lists_database.db-shm"))
+                        val legacyWal = context.getDatabasePath("listy_database.db-wal")
+                        if (legacyWal.exists()) legacyWal.renameTo(context.getDatabasePath("lists_database.db-wal"))
+                    } catch (_: Exception) {}
+                }
+
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "listy_database.db"
+                    "lists_database.db"
                 )
                     .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigration()

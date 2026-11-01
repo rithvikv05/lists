@@ -33,12 +33,27 @@ class AppRepository(private val context: Context) {
 
     fun getList(id: Long): Flow<UserList?> = listDao.getListById(id)
     suspend fun getListSync(id: Long): UserList? = listDao.getListByIdSync(id)
+    suspend fun getListSyncAll(): List<UserList> = withContext(Dispatchers.IO) { listDao.getAllListsSync() }
 
     fun getItems(listId: Long): Flow<List<ListItem>> = itemDao.getItemsForList(listId)
     fun getItem(id: Long): Flow<ListItem?> = itemDao.getItemById(id)
     suspend fun getItemSync(id: Long): ListItem? = itemDao.getItemByIdSync(id)
+    suspend fun getItemsSync(listId: Long): List<ListItem> = withContext(Dispatchers.IO) { itemDao.getItemsForListSync(listId) }
+    suspend fun getAllItemsSyncAll(): List<ListItem> = withContext(Dispatchers.IO) { itemDao.getAllItemsSync() }
 
     fun getPreviewCovers(listId: Long): Flow<List<String>> = itemDao.getPreviewCovers(listId)
+
+    private fun triggerOfflineCoverDownload(uuid: String, coverUrl: String) {
+        if (uuid.isBlank() || coverUrl.isBlank()) return
+        val storageManager = com.lists.app.data.storage.OfflineStorageManager.getInstance(context)
+        if (storageManager.isImmediateOffline) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    storageManager.cacheCoverImmediately(uuid, coverUrl)
+                } catch (_: Exception) {}
+            }
+        }
+    }
 
     suspend fun createList(
         name: String,
@@ -70,14 +85,21 @@ class AppRepository(private val context: Context) {
         notifyDataChanged()
     }
 
+    private val storageManager by lazy { com.lists.app.data.storage.OfflineStorageManager.getInstance(context) }
+
     suspend fun deleteList(list: UserList) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val items = itemDao.getItemsForListSync(list.id)
         items.forEach { item ->
+            storageManager.deleteCover(item.uuid, item.coverUrl)
             tombstoneManager.recordDeletedItem(item.uuid, now)
         }
         tombstoneManager.recordDeletedList(list.uuid, now)
         listDao.deleteList(list)
+        try {
+            context.getSharedPreferences("lists_view_prefs", Context.MODE_PRIVATE)
+                .edit().remove("view_mode_${list.id}").apply()
+        } catch (_: Exception) {}
         notifyDataChanged()
     }
 
@@ -177,6 +199,7 @@ class AppRepository(private val context: Context) {
         )
         val insertedId = itemDao.insertItem(item)
         notifyDataChanged()
+        triggerOfflineCoverDownload(item.uuid, item.coverUrl)
         if (search.coverUrl.isBlank()) {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
@@ -187,6 +210,7 @@ class AppRepository(private val context: Context) {
                         if (current != null && current.coverUrl.isBlank()) {
                             itemDao.updateItem(current.copy(coverUrl = resolved, updatedAt = System.currentTimeMillis()))
                             notifyDataChanged()
+                            triggerOfflineCoverDownload(current.uuid, resolved)
                         }
                     }
                 } catch (_: Exception) {}
@@ -206,6 +230,7 @@ class AppRepository(private val context: Context) {
                 if (current != null && current.coverUrl.isBlank()) {
                     itemDao.updateItem(current.copy(coverUrl = resolved, updatedAt = System.currentTimeMillis()))
                     notifyDataChanged()
+                    triggerOfflineCoverDownload(current.uuid, resolved)
                 }
             }
         } catch (_: Exception) {}
@@ -237,12 +262,17 @@ class AppRepository(private val context: Context) {
         )
         val id = itemDao.insertItem(item)
         notifyDataChanged()
+        triggerOfflineCoverDownload(item.uuid, item.coverUrl)
         id
     }
 
     suspend fun updateItem(item: ListItem) = withContext(Dispatchers.IO) {
+        if (item.coverUrl.isBlank()) {
+            storageManager.deleteCover(item.uuid)
+        }
         itemDao.updateItem(item.copy(updatedAt = System.currentTimeMillis()))
         notifyDataChanged()
+        triggerOfflineCoverDownload(item.uuid, item.coverUrl)
     }
 
     suspend fun toggleItemMarked(item: ListItem) = withContext(Dispatchers.IO) {
@@ -321,6 +351,8 @@ class AppRepository(private val context: Context) {
     }
 
     suspend fun deleteItem(item: ListItem) = withContext(Dispatchers.IO) {
+        // Instantly delete cached cover and evict image caches
+        storageManager.deleteCover(item.uuid, item.coverUrl)
         tombstoneManager.recordDeletedItem(item.uuid, System.currentTimeMillis())
         itemDao.deleteItem(item)
         notifyDataChanged()
@@ -330,6 +362,7 @@ class AppRepository(private val context: Context) {
         val now = System.currentTimeMillis()
         val completed = itemDao.getItemsForListSync(listId).filter { it.marked }
         completed.forEach { item ->
+            storageManager.deleteCover(item.uuid, item.coverUrl)
             tombstoneManager.recordDeletedItem(item.uuid, now)
         }
         itemDao.clearCompleted(listId)
@@ -572,7 +605,13 @@ class AppRepository(private val context: Context) {
             for (localList in currentLocalLists) {
                 val deletedAt = allDeletedLists[localList.uuid]
                 if (deletedAt != null && deletedAt >= localList.updatedAt) {
+                    val listItems = itemDao.getItemsForListSync(localList.id)
+                    listItems.forEach { storageManager.deleteCover(it.uuid, it.coverUrl) }
                     listDao.deleteList(localList)
+                    try {
+                        context.getSharedPreferences("lists_view_prefs", Context.MODE_PRIVATE)
+                            .edit().remove("view_mode_${localList.id}").apply()
+                    } catch (_: Exception) {}
                 }
             }
 
@@ -581,6 +620,7 @@ class AppRepository(private val context: Context) {
             for (localItem in currentLocalItems) {
                 val deletedAt = allDeletedItems[localItem.uuid]
                 if (deletedAt != null && deletedAt >= localItem.updatedAt) {
+                    storageManager.deleteCover(localItem.uuid, localItem.coverUrl)
                     itemDao.deleteItem(localItem)
                 }
             }
@@ -619,7 +659,10 @@ class AppRepository(private val context: Context) {
                             score
                         } ?: itemGroup.first()
                         val dups = itemGroup.filter { it.id != primaryItem.id }
-                        dups.forEach { itemDao.deleteItem(it) }
+                        dups.forEach { dupItem ->
+                            storageManager.deleteCover(dupItem.uuid, dupItem.coverUrl)
+                            itemDao.deleteItem(dupItem)
+                        }
                     }
                 }
             }
@@ -831,11 +874,21 @@ class AppRepository(private val context: Context) {
                     editor.apply()
                 }
             }
+            // 8. Prune any orphaned cover files that no longer belong to active items
+            pruneOrphanedCovers()
         } catch (e: Exception) {
             e.printStackTrace()
         }
 
         // Return the fresh merged export
         exportDataToJson()
+    }
+
+    suspend fun pruneOrphanedCovers() = withContext(Dispatchers.IO) {
+        try {
+            val allItems = itemDao.getAllItemsSync()
+            val activeUuids = allItems.map { it.uuid }.toSet()
+            storageManager.pruneOrphanedCovers(activeUuids)
+        } catch (_: Exception) {}
     }
 }

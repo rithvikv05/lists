@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
@@ -64,8 +65,10 @@ import com.lists.app.data.model.DisplayBadge
 import com.lists.app.data.model.RatingConverter
 import com.lists.app.data.model.RatingScaleOption
 import com.lists.app.data.repository.AppRepository
+import com.lists.app.data.storage.OfflineStorageManager
 import com.lists.app.ui.components.CategoryIcon
 import com.lists.app.ui.theme.*
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -151,6 +154,11 @@ fun ItemDetailScreen(
     val ratingPrefs = remember { context.getSharedPreferences("lists_rating_prefs", Context.MODE_PRIVATE) }
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var editName by remember { mutableStateOf("") }
+    var editDate by remember { mutableStateOf("") }
+    var editPictureUrl by remember { mutableStateOf("") }
+    var editOverview by remember { mutableStateOf("") }
     var loadedEpisodes by remember { mutableStateOf<List<EpisodeItem>>(emptyList()) }
     var isLoadingEpisodes by remember { mutableStateOf(false) }
     var selectedSeason by remember { mutableIntStateOf(1) }
@@ -300,6 +308,22 @@ fun ItemDetailScreen(
                     }
                 },
                 actions = {
+                    // Edit item
+                    IconButton(onClick = {
+                        editName = currentItem.title
+                        editDate = currentItem.releaseYear.ifEmpty { currentItem.releaseDate }
+                        editPictureUrl = currentItem.coverUrl
+                        editOverview = currentItem.overview
+                        showEditDialog = true
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit",
+                            tint = TextWhite,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
                     // Pin toggle
                     IconButton(onClick = {
                         triggerAsmrTick(context)
@@ -347,10 +371,16 @@ fun ItemDetailScreen(
                 verticalAlignment = Alignment.Top
             ) {
                 Box {
-                    if (currentItem.coverUrl.isNotEmpty()) {
+                    val displayCover = remember(currentItem.uuid, currentItem.coverUrl) {
+                        OfflineStorageManager.getInstance(context).getDisplayCover(currentItem.uuid, currentItem.coverUrl)
+                    }
+                    val hasValidCover = (displayCover is File && displayCover.exists() && displayCover.length() > 0) ||
+                                        (displayCover is String && displayCover.isNotEmpty())
+
+                    if (hasValidCover) {
                         AsyncImage(
                             model = ImageRequest.Builder(LocalContext.current)
-                                .data(currentItem.coverUrl)
+                                .data(displayCover)
                                 .crossfade(true)
                                 .build(),
                             contentDescription = currentItem.title,
@@ -745,6 +775,145 @@ fun ItemDetailScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel", color = TextGrayMedium)
+                }
+            }
+        )
+    }
+
+    if (showEditDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            containerColor = DarkCardBg,
+            title = {
+                Text(
+                    text = "Edit Item",
+                    color = TextWhite,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        label = { Text("Name", color = TextGrayMedium) },
+                        singleLine = true,
+                        textStyle = LocalTextStyle.current.copy(color = TextWhite, fontSize = 14.sp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = TextWhite,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedTextColor = TextWhite,
+                            unfocusedTextColor = TextWhite,
+                            cursorColor = TextWhite
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = editDate,
+                        onValueChange = { editDate = it },
+                        label = { Text("Release Date / Year", color = TextGrayMedium) },
+                        singleLine = true,
+                        textStyle = LocalTextStyle.current.copy(color = TextWhite, fontSize = 14.sp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = TextWhite,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedTextColor = TextWhite,
+                            unfocusedTextColor = TextWhite,
+                            cursorColor = TextWhite
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = editPictureUrl,
+                        onValueChange = { editPictureUrl = it },
+                        label = { Text("Picture URL", color = TextGrayMedium) },
+                        singleLine = true,
+                        textStyle = LocalTextStyle.current.copy(color = TextWhite, fontSize = 14.sp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = TextWhite,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedTextColor = TextWhite,
+                            unfocusedTextColor = TextWhite,
+                            cursorColor = TextWhite
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (editPictureUrl.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(110.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(editPictureUrl.trim())
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "Preview",
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .aspectRatio(2f / 3f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(DarkCardElevated),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = editOverview,
+                        onValueChange = { editOverview = it },
+                        label = { Text("Overview", color = TextGrayMedium) },
+                        minLines = 3,
+                        maxLines = 6,
+                        textStyle = LocalTextStyle.current.copy(color = TextWhite, fontSize = 14.sp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = TextWhite,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedTextColor = TextWhite,
+                            unfocusedTextColor = TextWhite,
+                            cursorColor = TextWhite
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            repository.updateItem(
+                                currentItem.copy(
+                                    title = editName.trim(),
+                                    releaseYear = editDate.trim(),
+                                    releaseDate = editDate.trim(),
+                                    coverUrl = editPictureUrl.trim(),
+                                    overview = editOverview.trim(),
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                            )
+                        }
+                        showEditDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = TextWhite, contentColor = PureBlack),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Save", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditDialog = false }) {
                     Text("Cancel", color = TextGrayMedium)
                 }
             }

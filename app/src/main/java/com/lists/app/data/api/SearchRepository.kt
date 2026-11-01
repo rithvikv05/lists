@@ -52,8 +52,8 @@ data class EpisodeItem(
 
 class SearchRepository {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
         .build()
 
     suspend fun fetchOttPlatforms(title: String, category: Category): List<OttPlatform> = withContext(Dispatchers.IO) {
@@ -244,7 +244,7 @@ class SearchRepository {
             val url = "https://api.tvmaze.com/singlesearch/shows?q=$encoded&embed=episodes"
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "ListyClone/1.0")
+                .header("User-Agent", "ListsApp/1.0")
                 .build()
 
             client.newCall(req).execute().use { response ->
@@ -341,7 +341,70 @@ class SearchRepository {
                 score
             }
         )
-        sorted.take(40)
+        val deduped = deduplicateSearchResults(sorted)
+        deduped.take(40)
+    }
+
+    private fun deduplicateSearchResults(results: List<SearchResult>): List<SearchResult> {
+        val mergedList = mutableListOf<SearchResult>()
+        for (item in results) {
+            val cleanTitle = item.title
+                .replace(Regex("\\s*\\((?:tv series|tv show|series|film|movie|anime|manga|novel|comic|video game|game|\\d{4})\\)", RegexOption.IGNORE_CASE), "")
+                .trim()
+                .lowercase()
+                .replace(Regex("[^a-z0-9]"), "")
+
+            if (cleanTitle.isBlank()) continue
+
+            val itemYear = item.releaseYear.filter { it.isDigit() }.take(4).toIntOrNull()
+
+            val existingIndex = mergedList.indexOfFirst { existing ->
+                val existingClean = existing.title
+                    .replace(Regex("\\s*\\((?:tv series|tv show|series|film|movie|anime|manga|novel|comic|video game|game|\\d{4})\\)", RegexOption.IGNORE_CASE), "")
+                    .trim()
+                    .lowercase()
+                    .replace(Regex("[^a-z0-9]"), "")
+
+                if (existingClean != cleanTitle) {
+                    false
+                } else {
+                    val existingYear = existing.releaseYear.filter { it.isDigit() }.take(4).toIntOrNull()
+                    if (itemYear != null && existingYear != null) {
+                        // Same item if years are within 1 year (e.g. 2023 festival vs 2024 theatrical release)
+                        kotlin.math.abs(itemYear - existingYear) <= 1
+                    } else {
+                        // One or both lack a year, so matching title is considered same item
+                        true
+                    }
+                }
+            }
+
+            if (existingIndex == -1) {
+                mergedList.add(item)
+            } else {
+                val existing = mergedList[existingIndex]
+                val betterCover = if (existing.coverUrl.isBlank() && item.coverUrl.isNotBlank()) item.coverUrl else existing.coverUrl
+                val betterOverview = if (existing.overview.length < item.overview.length) item.overview else existing.overview
+                val betterYear = if (existing.releaseYear.isBlank() && item.releaseYear.isNotBlank()) item.releaseYear else existing.releaseYear
+                val betterCreator = if (existing.creator.isBlank() && item.creator.isNotBlank()) item.creator else existing.creator
+                val betterRating = if (existing.rating <= 0f && item.rating > 0f) item.rating else existing.rating
+                val betterEpisodes = if (existing.totalEpisodes <= 0 && item.totalEpisodes > 0) item.totalEpisodes else existing.totalEpisodes
+                val betterPages = if (existing.totalPages <= 0 && item.totalPages > 0) item.totalPages else existing.totalPages
+                val betterExternalUrl = if (existing.externalUrl.isBlank() && item.externalUrl.isNotBlank()) item.externalUrl else existing.externalUrl
+
+                mergedList[existingIndex] = existing.copy(
+                    coverUrl = betterCover,
+                    overview = betterOverview,
+                    releaseYear = betterYear,
+                    creator = betterCreator,
+                    rating = betterRating,
+                    totalEpisodes = betterEpisodes,
+                    totalPages = betterPages,
+                    externalUrl = betterExternalUrl
+                )
+            }
+        }
+        return mergedList
     }
 
     // -------------------------------------------------------------
@@ -685,66 +748,155 @@ class SearchRepository {
         return null
     }
 
+    private fun searchITunesMovies(query: String, yearFilter: String? = null): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        try {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            val url = "https://itunes.apple.com/search?term=$encoded&media=movie&limit=25"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "ListsApp/1.0")
+                .build()
+            client.newCall(req).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val root = JSONObject(body)
+                    val arr = root.optJSONArray("results") ?: JSONArray()
+                    for (i in 0 until arr.length()) {
+                        val item = arr.getJSONObject(i)
+                        val title = item.optString("trackName").ifEmpty { item.optString("collectionName") }
+                        if (title.isBlank()) continue
+                        val artwork = item.optString("artworkUrl100")
+                            .replace("100x100bb.jpg", "600x600bb.jpg")
+                            .replace("100x100bb.png", "600x600bb.png")
+                        val releaseDate = item.optString("releaseDate", "")
+                        val year = if (releaseDate.length >= 4) releaseDate.take(4) else ""
+                        val overview = item.optString("longDescription").ifEmpty { item.optString("shortDescription") }
+                        val director = item.optString("artistName")
+                        val previewUrl = item.optString("trackViewUrl")
+
+                        results.add(
+                            SearchResult(
+                                title = title,
+                                creator = director,
+                                releaseYear = year,
+                                releaseDate = releaseDate.take(10),
+                                coverUrl = artwork,
+                                overview = cleanHtml(overview),
+                                category = Category.MOVIE,
+                                externalUrl = previewUrl
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return results
+    }
+
+    private fun searchITunesTv(query: String, yearFilter: String? = null): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        try {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            val url = "https://itunes.apple.com/search?term=$encoded&media=tvShow&entity=tvSeason&limit=20"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "ListsApp/1.0")
+                .build()
+            client.newCall(req).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val root = JSONObject(body)
+                    val arr = root.optJSONArray("results") ?: JSONArray()
+                    for (i in 0 until arr.length()) {
+                        val item = arr.getJSONObject(i)
+                        val title = item.optString("collectionName").ifEmpty { item.optString("trackName") }
+                        if (title.isBlank()) continue
+                        val artwork = item.optString("artworkUrl100")
+                            .replace("100x100bb.jpg", "600x600bb.jpg")
+                        val releaseDate = item.optString("releaseDate", "")
+                        val year = if (releaseDate.length >= 4) releaseDate.take(4) else ""
+                        val overview = item.optString("longDescription")
+                        val artist = item.optString("artistName")
+                        val url = item.optString("collectionViewUrl")
+
+                        results.add(
+                            SearchResult(
+                                title = title,
+                                creator = artist,
+                                releaseYear = year,
+                                coverUrl = artwork,
+                                overview = cleanHtml(overview),
+                                category = Category.TV_SHOW,
+                                externalUrl = url
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return results
+    }
+
     // -------------------------------------------------------------
-    // MOVIES: Multi-page OMDb (30-40 results) with Wikipedia fallback
+    // MOVIES: iTunes Fast Search + OMDb Parallel with Wikipedia fallback
     // -------------------------------------------------------------
     private suspend fun searchMovies(query: String, yearFilter: String? = null, langFilter: String? = null): List<SearchResult> = coroutineScope {
         val encoded = URLEncoder.encode(query, "UTF-8")
         val yearParam = if (!yearFilter.isNullOrBlank()) "&y=${URLEncoder.encode(yearFilter.trim(), "UTF-8")}" else ""
 
-        val deferredPages = (1..3).map { page ->
-            async {
-                val results = mutableListOf<SearchResult>()
-                try {
-                    val url = "https://www.omdbapi.com/?s=$encoded$yearParam&type=movie&page=$page&apikey=trilogy"
-                    val req = Request.Builder()
-                        .url(url)
-                        .header("User-Agent", "ListyClone/1.0")
-                        .build()
+        val itunesDeferred = async { searchITunesMovies(query, yearFilter) }
+        val omdbDeferred = async {
+            val results = mutableListOf<SearchResult>()
+            try {
+                val url = "https://www.omdbapi.com/?s=$encoded$yearParam&type=movie&page=1&apikey=trilogy"
+                val req = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "ListsApp/1.0")
+                    .build()
 
-                    client.newCall(req).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val body = response.body?.string() ?: ""
-                            val json = JSONObject(body)
-                            if (json.optString("Response") == "True") {
-                                val searchArr = json.optJSONArray("Search") ?: JSONArray()
-                                for (i in 0 until searchArr.length()) {
-                                    val item = searchArr.getJSONObject(i)
-                                    val title = item.optString("Title")
-                                    val year = item.optString("Year")
-                                    var poster = item.optString("Poster")
-                                    if (poster == "N/A") poster = ""
-                                    val imdbId = item.optString("imdbID")
+                client.newCall(req).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val body = response.body?.string() ?: ""
+                        val json = JSONObject(body)
+                        if (json.optString("Response") == "True") {
+                            val searchArr = json.optJSONArray("Search") ?: JSONArray()
+                            for (i in 0 until searchArr.length()) {
+                                val item = searchArr.getJSONObject(i)
+                                val title = item.optString("Title")
+                                val year = item.optString("Year")
+                                var poster = item.optString("Poster")
+                                if (poster == "N/A") poster = ""
+                                val imdbId = item.optString("imdbID")
 
-                                    results.add(
-                                        SearchResult(
-                                            title = title,
-                                            releaseYear = year,
-                                            coverUrl = poster,
-                                            category = Category.MOVIE,
-                                            externalUrl = if (imdbId.isNotEmpty()) "https://www.imdb.com/title/$imdbId" else ""
-                                        )
+                                results.add(
+                                    SearchResult(
+                                        title = title,
+                                        releaseYear = year,
+                                        coverUrl = poster,
+                                        category = Category.MOVIE,
+                                        externalUrl = if (imdbId.isNotEmpty()) "https://www.imdb.com/title/$imdbId" else ""
                                     )
-                                }
+                                )
                             }
                         }
                     }
-                } catch (_: Exception) {}
-                results
-            }
+                }
+            } catch (_: Exception) {}
+            results
         }
 
-        val allOmdb = deferredPages.awaitAll().flatten().distinctBy { it.externalUrl.ifEmpty { it.title } }
-        if (allOmdb.size < 15) {
+        val allResults = itunesDeferred.await() + omdbDeferred.await()
+        if (allResults.size < 6) {
             val wiki = searchWikipedia(query, Category.MOVIE)
-            (allOmdb + wiki).distinctBy { it.title.lowercase().trim() }
+            allResults + wiki
         } else {
-            allOmdb
+            allResults
         }
     }
 
     // -------------------------------------------------------------
-    // TV SHOWS & ANIME: TVMaze + AniList + OMDb Series (Parallel, 30-40 items)
+    // TV SHOWS & ANIME: TVMaze + iTunes TV + AniList (Parallel, ~150ms)
     // -------------------------------------------------------------
     private suspend fun searchTvAndAnime(
         query: String,
@@ -755,28 +907,20 @@ class SearchRepository {
         val deferredList = when (tvSubFilter) {
             TvSubFilter.TV_SHOWS -> listOf(
                 async { searchTvMaze(query, yearFilter) },
+                async { searchITunesTv(query, yearFilter) },
                 async { searchOmdbSeries(query, yearFilter) }
             )
             TvSubFilter.ANIME -> listOf(
                 async { searchAniListAnime(query, yearFilter) }
             )
             TvSubFilter.ALL -> listOf(
-                async { searchAniListAnime(query, yearFilter) },
                 async { searchTvMaze(query, yearFilter) },
-                async { searchOmdbSeries(query, yearFilter) }
+                async { searchITunesTv(query, yearFilter) },
+                async { searchAniListAnime(query, yearFilter) }
             )
         }
 
-        val allResults = deferredList.awaitAll().flatten()
-        val seen = mutableSetOf<String>()
-        val deduped = mutableListOf<SearchResult>()
-        for (item in allResults) {
-            val key = item.title.lowercase().replace(Regex("[^a-z0-9]"), "")
-            if (key.isNotBlank() && seen.add(key)) {
-                deduped.add(item)
-            }
-        }
-        deduped
+        deferredList.awaitAll().flatten()
     }
 
     private fun searchAniListAnime(query: String, yearFilter: String? = null): List<SearchResult> {
@@ -789,7 +933,7 @@ class SearchRepository {
             val req = Request.Builder()
                 .url("https://graphql.anilist.co")
                 .header("Content-Type", "application/json")
-                .header("User-Agent", "ListyClone/1.0")
+                .header("User-Agent", "ListsApp/1.0")
                 .post(graphql.toRequestBody("application/json".toMediaType()))
                 .build()
 
@@ -844,7 +988,7 @@ class SearchRepository {
             val url = "https://api.tvmaze.com/search/shows?q=$encoded"
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "ListyClone/1.0")
+                .header("User-Agent", "ListsApp/1.0")
                 .build()
 
             client.newCall(req).execute().use { response ->
@@ -896,7 +1040,7 @@ class SearchRepository {
                     val url = "https://www.omdbapi.com/?s=$encoded$yearParam&type=series&page=$page&apikey=trilogy"
                     val req = Request.Builder()
                         .url(url)
-                        .header("User-Agent", "ListyClone/1.0")
+                        .header("User-Agent", "ListsApp/1.0")
                         .build()
 
                     client.newCall(req).execute().use { response ->
@@ -944,7 +1088,7 @@ class SearchRepository {
             val url = "https://api.mangadex.org/manga?title=$encoded&limit=30&includes[]=cover_art$langParam"
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "ListyClone/1.0 (contact@example.com)")
+                .header("User-Agent", "ListsApp/1.0 (contact@example.com)")
                 .build()
 
             client.newCall(req).execute().use { response ->
@@ -1005,7 +1149,7 @@ class SearchRepository {
             val url = "https://api.mangadex.org/manga/$mangaId/feed?limit=1&order[chapter]=desc"
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "ListyClone/1.0")
+                .header("User-Agent", "ListsApp/1.0")
                 .build()
             client.newCall(req).execute().use { response ->
                 if (response.isSuccessful) {
@@ -1031,7 +1175,7 @@ class SearchRepository {
             val url = "https://api.mangadex.org/manga?title=$encoded&limit=1"
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "ListyClone/1.0")
+                .header("User-Agent", "ListsApp/1.0")
                 .build()
             client.newCall(req).execute().use { response ->
                 if (response.isSuccessful) {
@@ -1066,41 +1210,154 @@ class SearchRepository {
         val deferredList = when (subFilter) {
             BookSubFilter.BOOKS -> listOf(
                 async { searchGoogleBooks(query, langFilter, bookSearchType) },
-                async { searchOpenLibrary(query, bookSearchType) }
+                async { searchAppleBooks(query) }
+            )
+            BookSubFilter.COMICS -> listOf(
+                async { searchGetComics(query) },
+                async { searchGoogleBooks("$query comic", langFilter, bookSearchType, isComic = true) },
+                async { searchAppleBooks("$query comic") }
             )
             BookSubFilter.MANGA -> listOf(
                 async { searchMangaDex(query, langFilter) },
                 async { searchAniListManga(query) },
-                async { searchGoogleBooks(query, langFilter, bookSearchType) }
-            )
-            BookSubFilter.COMICS -> listOf(
-                async { searchGoogleBooks("$query comic", langFilter, bookSearchType) },
-                async { searchWikipedia("$query comic", Category.BOOK) },
-                async { searchMangaDex(query, langFilter) }
+                async { searchGoogleBooks("$query manga", langFilter, bookSearchType) }
             )
             BookSubFilter.ALL -> listOf(
                 async { searchGoogleBooks(query, langFilter, bookSearchType) },
-                async { searchOpenLibrary(query, bookSearchType) },
-                async { searchMangaDex(query, langFilter) },
-                async { searchAniListManga(query) }
+                async { searchAppleBooks(query) },
+                async { searchGetComics(query) },
+                async { searchAniListManga(query) },
+                async { searchMangaDex(query, langFilter) }
             )
         }
 
-        val allResults = deferredList.awaitAll().flatten()
-        val seen = mutableSetOf<String>()
-        val deduped = mutableListOf<SearchResult>()
-        for (item in allResults) {
-            val key = item.title.lowercase().replace(Regex("[^a-z0-9]"), "")
-            if (key.isNotBlank() && seen.add(key)) {
-                deduped.add(item)
-            }
+        val allResults = deferredList.awaitAll().flatten().toMutableList()
+
+        // Fast fallback to OpenLibrary only if primary sources produced very few results (< 5)
+        if (allResults.size < 5 && (subFilter == BookSubFilter.BOOKS || subFilter == BookSubFilter.ALL)) {
+            val olResults = searchOpenLibrary(query, bookSearchType)
+            allResults.addAll(olResults)
         }
+
+        val deduped = deduplicateSearchResults(allResults)
         if (!yearFilter.isNullOrBlank()) {
             val (matching, rest) = deduped.partition { matchesYear(it.releaseYear, yearFilter) }
             matching + rest
         } else {
             deduped
         }
+    }
+
+    private fun searchGetComics(query: String): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        try {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            val url = "https://getcomics.org/wp-json/wp/v2/posts?search=$encoded&_embed=1&per_page=20"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "ListsApp/1.0 (Mozilla/5.0)")
+                .build()
+            client.newCall(req).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val arr = JSONArray(body)
+                    for (i in 0 until arr.length()) {
+                        val item = arr.getJSONObject(i)
+                        val rawTitle = item.optJSONObject("title")?.optString("rendered") ?: ""
+                        val cleanTitle = cleanHtml(rawTitle)
+                        if (cleanTitle.isBlank()) continue
+
+                        var cover = item.optString("jetpack_featured_media_url")
+                        if (cover.isBlank()) {
+                            val yoast = item.optJSONObject("yoast_head_json")
+                            val ogImages = yoast?.optJSONArray("og_image")
+                            cover = ogImages?.optJSONObject(0)?.optString("url") ?: ""
+                        }
+                        if (cover.isBlank()) {
+                            val embedded = item.optJSONObject("_embedded")
+                            val mediaArr = embedded?.optJSONArray("wp:featuredmedia")
+                            cover = mediaArr?.optJSONObject(0)?.optString("source_url") ?: ""
+                        }
+                        if (cover.startsWith("http://")) {
+                            cover = cover.replace("http://", "https://")
+                        }
+
+                        val dateStr = item.optString("date", "")
+                        val dateYear = if (dateStr.length >= 4) dateStr.take(4) else ""
+                        val titleYearMatch = Regex("\\b(19\\d{2}|20\\d{2})\\b").findAll(cleanTitle).lastOrNull()?.value
+                        val year = titleYearMatch ?: dateYear
+
+                        val excerpt = item.optJSONObject("excerpt")?.optString("rendered") ?: ""
+                        val yoastDesc = item.optJSONObject("yoast_head_json")?.optString("og_description") ?: ""
+                        val overview = cleanHtml(if (yoastDesc.isNotBlank()) yoastDesc else excerpt)
+                        val postUrl = item.optString("link", "")
+
+                        results.add(
+                            SearchResult(
+                                title = cleanTitle,
+                                releaseYear = year,
+                                releaseDate = dateStr.take(10),
+                                coverUrl = cover,
+                                overview = overview,
+                                category = Category.BOOK,
+                                externalUrl = postUrl
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return results
+    }
+
+    private fun searchAppleBooks(query: String): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        try {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            val url = "https://itunes.apple.com/search?term=$encoded&entity=ebook&limit=30"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "ListsApp/1.0")
+                .build()
+            client.newCall(req).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val root = JSONObject(body)
+                    val arr = root.optJSONArray("results") ?: JSONArray()
+                    for (i in 0 until arr.length()) {
+                        val item = arr.getJSONObject(i)
+                        val title = item.optString("trackName").ifEmpty { item.optString("trackCensoredName") }
+                        if (title.isBlank()) continue
+                        val author = item.optString("artistName")
+                        val artwork = item.optString("artworkUrl100")
+                            .replace("100x100bb.jpg", "800x800bb.jpg")
+                            .replace("100x100bb.png", "800x800bb.png")
+                        val releaseDate = item.optString("releaseDate", "")
+                        val year = if (releaseDate.length >= 4) releaseDate.take(4) else ""
+                        val overview = cleanHtml(item.optString("description"))
+                        val rating = item.optDouble("averageUserRating", 0.0).toFloat() * 2f
+                        val viewUrl = item.optString("trackViewUrl")
+
+                        results.add(
+                            SearchResult(
+                                title = title,
+                                creator = author,
+                                releaseYear = year,
+                                releaseDate = releaseDate.take(10),
+                                coverUrl = artwork,
+                                rating = rating,
+                                overview = overview,
+                                category = Category.BOOK,
+                                externalUrl = viewUrl
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return results
     }
 
     private fun searchAniListManga(query: String): List<SearchResult> {
@@ -1113,7 +1370,7 @@ class SearchRepository {
             val req = Request.Builder()
                 .url("https://graphql.anilist.co")
                 .header("Content-Type", "application/json")
-                .header("User-Agent", "ListyClone/1.0")
+                .header("User-Agent", "ListsApp/1.0")
                 .post(graphql.toRequestBody("application/json".toMediaType()))
                 .build()
 
@@ -1162,7 +1419,8 @@ class SearchRepository {
     private fun searchGoogleBooks(
         query: String,
         langFilter: String? = null,
-        bookSearchType: BookSearchType = BookSearchType.ALL
+        bookSearchType: BookSearchType = BookSearchType.ALL,
+        isComic: Boolean = false
     ): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
         try {
@@ -1170,14 +1428,14 @@ class SearchRepository {
             val formattedQuery = when (bookSearchType) {
                 BookSearchType.AUTHOR -> "inauthor:$qClean"
                 BookSearchType.TITLE -> "intitle:$qClean"
-                BookSearchType.ALL -> qClean
+                BookSearchType.ALL -> if (isComic && !qClean.contains("comic", ignoreCase = true)) "$qClean comic" else qClean
             }
             val encoded = URLEncoder.encode(formattedQuery, "UTF-8")
             val langParam = if (!langFilter.isNullOrBlank()) "&langRestrict=${URLEncoder.encode(langFilter.lowercase(), "UTF-8")}" else ""
             val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=40$langParam"
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "Mozilla/5.0")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                 .build()
 
             client.newCall(req).execute().use { response ->
@@ -1187,30 +1445,52 @@ class SearchRepository {
                     val items = json.optJSONArray("items") ?: JSONArray()
                     for (i in 0 until items.length()) {
                         val item = items.getJSONObject(i)
+                        val volumeId = item.optString("id")
                         val vol = item.optJSONObject("volumeInfo") ?: continue
-                        val title = vol.optString("title")
+                        val rawTitle = vol.optString("title")
+                        val subtitle = vol.optString("subtitle")
+                        val title = if (subtitle.isNotBlank() && !rawTitle.contains(subtitle, ignoreCase = true)) {
+                            "$rawTitle: $subtitle"
+                        } else rawTitle
+
                         val authors = vol.optJSONArray("authors")
                         val author = if (authors != null && authors.length() > 0) authors.getString(0) else ""
                         val publishedDate = vol.optString("publishedDate")
                         val year = if (publishedDate.length >= 4) publishedDate.substring(0, 4) else ""
                         val desc = cleanHtml(vol.optString("description"))
                         val imageLinks = vol.optJSONObject("imageLinks")
-                        var thumb = imageLinks?.optString("thumbnail") ?: imageLinks?.optString("smallThumbnail") ?: ""
-                        if (thumb.startsWith("http://")) {
-                            thumb = thumb.replace("http://", "https://")
+
+                        var cover = imageLinks?.optString("extraLarge")
+                            ?: imageLinks?.optString("large")
+                            ?: imageLinks?.optString("medium")
+                            ?: imageLinks?.optString("small")
+                            ?: imageLinks?.optString("thumbnail")
+                            ?: imageLinks?.optString("smallThumbnail")
+                            ?: ""
+
+                        if (cover.isNotBlank()) {
+                            cover = cover.replace("http://", "https://")
+                                .replace("&edge=curl", "")
+                                .replace("&zoom=5", "&zoom=1")
+                        } else if (volumeId.isNotBlank()) {
+                            cover = "https://books.google.com/books/content?id=$volumeId&printsec=frontcover&img=1&zoom=1"
                         }
+
                         val pages = vol.optInt("pageCount", 0)
                         val rating = vol.optDouble("averageRating", 0.0).toFloat() * 2f
+                        val infoLink = vol.optString("infoLink")
 
                         results.add(
                             SearchResult(
                                 title = title,
                                 creator = author,
                                 releaseYear = year,
+                                releaseDate = publishedDate.take(10),
                                 overview = desc,
-                                coverUrl = thumb,
+                                coverUrl = cover,
                                 rating = rating,
                                 category = Category.BOOK,
+                                externalUrl = infoLink,
                                 totalPages = pages
                             )
                         )
@@ -1238,7 +1518,7 @@ class SearchRepository {
             }
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "ListyClone/1.0")
+                .header("User-Agent", "ListsApp/1.0")
                 .build()
 
             client.newCall(req).execute().use { response ->
@@ -1326,15 +1606,21 @@ class SearchRepository {
                     if (!wikiCover.isNullOrBlank()) return@withContext wikiCover
                 }
                 Category.BOOK -> {
-                    val books = searchGoogleBooks(if (creator.isNotBlank()) "$cleanTitle $creator" else cleanTitle)
-                    val bookCover = books.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl
-                    if (!bookCover.isNullOrBlank()) return@withContext bookCover
-                    val ol = searchOpenLibrary(cleanTitle)
-                    val olCover = ol.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl
-                    if (!olCover.isNullOrBlank()) return@withContext olCover
+                    val gBooks = searchGoogleBooks(if (creator.isNotBlank()) "$cleanTitle $creator" else cleanTitle)
+                    val gCover = gBooks.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl
+                    if (!gCover.isNullOrBlank()) return@withContext gCover
+                    val aBooks = searchAppleBooks(cleanTitle)
+                    val aCover = aBooks.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl
+                    if (!aCover.isNullOrBlank()) return@withContext aCover
+                    val comics = searchGetComics(cleanTitle)
+                    val cCover = comics.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl
+                    if (!cCover.isNullOrBlank()) return@withContext cCover
                     val manga = searchMangaDex(cleanTitle)
                     val mCover = manga.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl
                     if (!mCover.isNullOrBlank()) return@withContext mCover
+                    val ol = searchOpenLibrary(cleanTitle)
+                    val olCover = ol.firstOrNull { it.coverUrl.isNotBlank() }?.coverUrl
+                    if (!olCover.isNullOrBlank()) return@withContext olCover
                 }
                 Category.MOVIE -> {
                     val movies = searchMovies(cleanTitle)
@@ -1504,7 +1790,7 @@ class SearchRepository {
                 val url = "https://en.wikipedia.org/w/api.php?action=query&titles=$encodedTitles&prop=imageinfo&iiprop=url&iiurlwidth=600&format=json"
                 val req = Request.Builder()
                     .url(url)
-                    .header("User-Agent", "ListyClone/1.0 (contact@example.com)")
+                    .header("User-Agent", "ListsApp/1.0 (contact@example.com)")
                     .build()
                 client.newCall(req).execute().use { response ->
                     if (response.isSuccessful) {
@@ -1553,7 +1839,7 @@ class SearchRepository {
 
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "ListyClone/1.0 (contact@example.com)")
+                .header("User-Agent", "ListsApp/1.0 (contact@example.com)")
                 .build()
 
             client.newCall(req).execute().use { response ->

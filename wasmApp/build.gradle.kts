@@ -39,7 +39,9 @@ kotlin {
                 implementation("io.coil-kt.coil3:coil-compose:3.0.4")
                 implementation("io.coil-kt.coil3:coil-network-ktor3:3.0.4")
                 implementation("io.ktor:ktor-client-core:3.0.1")
+                implementation("io.ktor:ktor-client-js:3.0.1")
             }
+
         }
     }
 }

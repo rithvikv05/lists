@@ -21,8 +21,8 @@ data class UserList(
     val iconName: String = "",
     val colorHex: String = "",
     val customOrderIndex: Int = 0,
-    val createdAt: Long = 0L,
-    val updatedAt: Long = 0L,
+    val createdAt: Long = currentTimeMillis(),
+    val updatedAt: Long = currentTimeMillis(),
     val sortingOption: String = "DATE_ADDED_DESC",
     val filterOption: String = "ALL",
     val viewMode: String = "GRID_2"
@@ -59,11 +59,18 @@ data class ListItem(
     val totalPages: Int = 0,
     val gamePlatform: String = "",
     val customOrder: Int = 0,
-    val reviewRating: Int = 0, // 0: None, 1: Skip, 2: Timepass, 3: Go for It, 4: Perfection
+    val reviewRating: Int = 0,
     val checkedEpisodesJson: String = "",
     val episodesDataJson: String = "",
-    val createdAt: Long = 0L,
-    val updatedAt: Long = 0L
+    val createdAt: Long = currentTimeMillis(),
+    val updatedAt: Long = currentTimeMillis()
+)
+
+@Serializable
+data class ListWithStats(
+    val list: UserList,
+    val itemCount: Int,
+    val completedCount: Int
 )
 
 @Serializable

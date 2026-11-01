@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -34,6 +35,8 @@ import kotlinx.coroutines.launch
 import com.lists.app.data.model.Category
 import com.lists.app.data.model.RatingScaleOption
 import com.lists.app.data.repository.AppRepository
+import com.lists.app.data.storage.OfflineStorageManager
+import com.lists.app.data.storage.OfflineStorageMode
 import com.lists.app.data.sync.DriveSyncManager
 import com.lists.app.data.sync.GoogleSignInHelper
 import com.lists.app.data.sync.SyncWorker
@@ -54,6 +57,15 @@ fun SettingsScreen(
 
     // Rating Systems SharedPreferences
     val ratingPrefs = remember { context.getSharedPreferences("lists_rating_prefs", Context.MODE_PRIVATE) }
+
+    // Offline Storage Manager state
+    val storageManager = remember { OfflineStorageManager.getInstance(context) }
+    var storageMode by remember { mutableStateOf(storageManager.storageMode) }
+    var coverCacheSize by remember { mutableLongStateOf(storageManager.getCoverCacheSizeBytes()) }
+    var coverCacheCount by remember { mutableIntStateOf(storageManager.getCoverCacheCount()) }
+    var isCachingCovers by remember { mutableStateOf(false) }
+    var cacheProgress by remember { mutableStateOf("") }
+    var showClearCacheDialog by remember { mutableStateOf(false) }
 
     // Google Drive Sync state
     val signInHelper = remember { GoogleSignInHelper(context) }
@@ -136,6 +148,52 @@ fun SettingsScreen(
                         Toast.makeText(context, "Imported successfully", Toast.LENGTH_SHORT).show()
                     } else {
                         statusMessage = "Invalid backup format"
+                    }
+                } catch (e: Exception) {
+                    statusMessage = "Failed to import: ${e.message}"
+                }
+            }
+        }
+    }
+
+    val exportPackageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument(OfflineStorageManager.PACKAGE_MIME_TYPE)
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    context.contentResolver.openOutputStream(uri)?.use { os ->
+                        val success = storageManager.exportPackage(os, repository)
+                        if (success) {
+                            statusMessage = "Offline Package (.listspkg) exported successfully!"
+                            Toast.makeText(context, "Exported .listspkg successfully", Toast.LENGTH_SHORT).show()
+                        } else {
+                            statusMessage = "Failed to export offline package"
+                        }
+                    }
+                } catch (e: Exception) {
+                    statusMessage = "Failed to export: ${e.message}"
+                }
+            }
+        }
+    }
+
+    val importPackageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        val success = storageManager.importPackage(input, repository)
+                        if (success) {
+                            coverCacheSize = storageManager.getCoverCacheSizeBytes()
+                            coverCacheCount = storageManager.getCoverCacheCount()
+                            statusMessage = "Offline Package (.listspkg) imported successfully!"
+                            Toast.makeText(context, "Imported .listspkg successfully", Toast.LENGTH_SHORT).show()
+                        } else {
+                            statusMessage = "Invalid offline package format"
+                        }
                     }
                 } catch (e: Exception) {
                     statusMessage = "Failed to import: ${e.message}"
@@ -649,6 +707,8 @@ fun SettingsScreen(
                                     val res = syncManager.forceDownload(acct, repository)
                                     isSyncing = false
                                     lastSyncTimestamp = syncManager.lastSyncTimestamp
+                                    coverCacheSize = storageManager.getCoverCacheSizeBytes()
+                                    coverCacheCount = storageManager.getCoverCacheCount()
                                     when (res) {
                                         is DriveSyncManager.SyncResult.Success -> {
                                             statusMessage = "Restored successfully from Google Drive!"
@@ -682,9 +742,9 @@ fun SettingsScreen(
             HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
             Spacer(modifier = Modifier.height(24.dp))
 
-            // DATA BACKUP SECTION
+            // OFFLINE MEDIA & STORAGE SECTION
             Text(
-                text = "DATA BACKUP",
+                text = "OFFLINE MEDIA & STORAGE",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.sp,
@@ -693,36 +753,351 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Two simple buttons: Export and Import
+            Surface(
+                color = DarkCardElevated,
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    // Option 1: Download Offline
+                    val isImmediate = storageMode == OfflineStorageMode.IMMEDIATE_OFFLINE
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                storageMode = OfflineStorageMode.IMMEDIATE_OFFLINE
+                                storageManager.storageMode = OfflineStorageMode.IMMEDIATE_OFFLINE
+                                triggerAsmrTick(context)
+                            }
+                            .background(if (isImmediate) Color.White.copy(alpha = 0.05f) else Color.Transparent)
+                            .border(
+                                width = 1.dp,
+                                color = if (isImmediate) TextWhite else Color.Transparent,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = isImmediate,
+                            onClick = {
+                                storageMode = OfflineStorageMode.IMMEDIATE_OFFLINE
+                                storageManager.storageMode = OfflineStorageMode.IMMEDIATE_OFFLINE
+                                triggerAsmrTick(context)
+                            },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = TextWhite,
+                                unselectedColor = TextSecondary
+                            ),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Download Offline",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextWhite
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Option 2: Online Stream
+                    val isStream = storageMode == OfflineStorageMode.ONLINE_STREAM
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                storageMode = OfflineStorageMode.ONLINE_STREAM
+                                storageManager.storageMode = OfflineStorageMode.ONLINE_STREAM
+                                triggerAsmrTick(context)
+                            }
+                            .background(if (isStream) Color.White.copy(alpha = 0.05f) else Color.Transparent)
+                            .border(
+                                width = 1.dp,
+                                color = if (isStream) TextWhite else Color.Transparent,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = isStream,
+                            onClick = {
+                                storageMode = OfflineStorageMode.ONLINE_STREAM
+                                storageManager.storageMode = OfflineStorageMode.ONLINE_STREAM
+                                triggerAsmrTick(context)
+                            },
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = TextWhite,
+                                unselectedColor = TextSecondary
+                            ),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Online Stream",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextWhite
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Cache Stats & Actions
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Offline Covers Cache",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextWhite
+                            )
+                            Text(
+                                text = "${storageManager.formatBytes(coverCacheSize)} ($coverCacheCount cached)",
+                                fontSize = 12.sp,
+                                color = TextSecondary
+                            )
+                        }
+
+                        if (coverCacheCount > 0) {
+                            TextButton(
+                                onClick = { showClearCacheDialog = true },
+                                colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFFF453A))
+                            ) {
+                                Text("Clear Cache", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Download Missing Covers Button
+                    OutlinedButton(
+                        onClick = {
+                            if (!isCachingCovers) {
+                                isCachingCovers = true
+                                cacheProgress = "Downloading..."
+                                coroutineScope.launch {
+                                    val count = storageManager.cacheAllMissingCovers(repository) { current, total ->
+                                        cacheProgress = "Downloading $current of $total..."
+                                    }
+                                    coverCacheSize = storageManager.getCoverCacheSizeBytes()
+                                    coverCacheCount = storageManager.getCoverCacheCount()
+                                    isCachingCovers = false
+                                    cacheProgress = ""
+                                    Toast.makeText(context, "Cached $count covers locally", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        enabled = !isCachingCovers,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextWhite)
+                    ) {
+                        if (isCachingCovers) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = TextWhite,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(cacheProgress, fontSize = 12.sp, color = TextWhite)
+                        } else {
+                            Text("Download All Missing Covers", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+
+            if (showClearCacheDialog) {
+                AlertDialog(
+                    onDismissRequest = { showClearCacheDialog = false },
+                    containerColor = DarkCardElevated,
+                    title = {
+                        Text(
+                            text = "Clear Offline Covers?",
+                            color = TextWhite,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "This will delete all locally cached cover images and free ${storageManager.formatBytes(coverCacheSize)}. Covers will be re-downloaded when viewed or synced.",
+                            color = TextSecondary,
+                            fontSize = 13.sp
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showClearCacheDialog = false
+                                val freed = storageManager.clearCoverCache()
+                                coverCacheSize = storageManager.getCoverCacheSizeBytes()
+                                coverCacheCount = storageManager.getCoverCacheCount()
+                                Toast.makeText(context, "Freed ${storageManager.formatBytes(freed)}", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFF453A),
+                                contentColor = TextWhite
+                            )
+                        ) {
+                            Text("Clear", fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showClearCacheDialog = false }) {
+                            Text("Cancel", color = TextSecondary)
+                        }
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+            HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // DATA BACKUP SECTION (Clean without descriptions)
+            Text(
+                text = "DATA BACKUP & EXPORT",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
+                color = TextSecondary
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Package Buttons: Export and Import (.listspkg)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
+                    onClick = {
+                        exportPackageLauncher.launch("lists_package.listspkg")
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = TextWhite, contentColor = PureBlack)
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Export .listspkg",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        importPackageLauncher.launch(arrayOf("*/*"))
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkCardElevated, contentColor = TextWhite),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle)
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Import .listspkg",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // JSON Buttons: Export JSON and Import JSON
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
                     onClick = {
                         exportLauncher.launch("lists_backup.json")
                     },
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = TextWhite, contentColor = PureBlack)
+                        .height(42.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
                 ) {
-                    Text("Export", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Export JSON",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
                 }
 
-                Button(
+                OutlinedButton(
                     onClick = {
                         importLauncher.launch(arrayOf("application/json", "text/*"))
                     },
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = DarkCardElevated, contentColor = TextWhite),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle)
+                        .height(42.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
                 ) {
-                    Text("Import", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Import JSON",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
                 }
             }
 

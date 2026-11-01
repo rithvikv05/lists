@@ -2,7 +2,7 @@ package com.lists.app.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Pure Listy Black & White / Grayscale Palette
+// Pure Lists Black & White / Grayscale Palette
 val PureBlack = Color(0xFF000000)
 val DarkCardBg = Color(0xFF161618)
 val DarkCardElevated = Color(0xFF222226)

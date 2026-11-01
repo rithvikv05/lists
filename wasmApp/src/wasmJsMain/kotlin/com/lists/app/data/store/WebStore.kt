@@ -1,8 +1,8 @@
 package com.lists.app.data.store
 
+import com.lists.app.currentTimeMillis
 import com.lists.app.data.model.*
 import kotlinx.browser.localStorage
-import kotlinx.browser.window
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,36 +40,45 @@ object WebStore {
     val lastSyncTime: StateFlow<Long?> = _lastSyncTime.asStateFlow()
 
     fun init() {
-        loadFromStorage()
-        if (_lists.value.isEmpty()) {
-            createDefaultLists()
+        val freshKey = "lists_fresh_defaults_cleared_v2"
+        if (localStorage[freshKey] == null) {
+            localStorage[freshKey] = "true"
+            val itemsJson = localStorage["lists_items"] ?: localStorage["listy_items"]
+            val hasItems = !itemsJson.isNullOrEmpty() && itemsJson != "[]"
+            if (!hasItems) {
+                localStorage.removeItem("lists_lists")
+                localStorage.removeItem("listy_lists")
+                localStorage.removeItem("lists_items")
+                localStorage.removeItem("listy_items")
+            }
         }
+        loadFromStorage()
     }
 
     private fun loadFromStorage() {
         try {
-            val listsJson = localStorage["listy_lists"]
+            val listsJson = localStorage["lists_lists"] ?: localStorage["listy_lists"]
             if (!listsJson.isNullOrEmpty()) {
                 _lists.value = json.decodeFromString(listsJson)
             }
 
-            val itemsJson = localStorage["listy_items"]
+            val itemsJson = localStorage["lists_items"] ?: localStorage["listy_items"]
             if (!itemsJson.isNullOrEmpty()) {
                 _items.value = json.decodeFromString(itemsJson)
             }
 
-            val tombstonesJson = localStorage["listy_tombstones"]
+            val tombstonesJson = localStorage["lists_tombstones"] ?: localStorage["listy_tombstones"]
             if (!tombstonesJson.isNullOrEmpty()) {
                 _tombstones.value = json.decodeFromString(tombstonesJson)
             }
 
-            val prefsJson = localStorage["listy_rating_prefs"]
+            val prefsJson = localStorage["lists_rating_prefs"] ?: localStorage["listy_rating_prefs"]
             if (!prefsJson.isNullOrEmpty()) {
                 _ratingPrefs.value = json.decodeFromString(prefsJson)
             }
 
-            _userEmail.value = localStorage["listy_user_email"]
-            val lastSync = localStorage["listy_last_sync"]?.toLongOrNull()
+            _userEmail.value = localStorage["lists_user_email"] ?: localStorage["listy_user_email"]
+            val lastSync = (localStorage["lists_last_sync"] ?: localStorage["listy_last_sync"])?.toLongOrNull()
             _lastSyncTime.value = lastSync
         } catch (e: Exception) {
             println("Error loading from localStorage: ${e.message}")
@@ -78,17 +87,18 @@ object WebStore {
 
     private fun saveToStorage() {
         try {
-            localStorage["listy_lists"] = json.encodeToString(_lists.value)
-            localStorage["listy_items"] = json.encodeToString(_items.value)
-            localStorage["listy_tombstones"] = json.encodeToString(_tombstones.value)
-            localStorage["listy_rating_prefs"] = json.encodeToString(_ratingPrefs.value)
+            localStorage["lists_lists"] = json.encodeToString(_lists.value)
+            localStorage["lists_items"] = json.encodeToString(_items.value)
+            localStorage["lists_tombstones"] = json.encodeToString(_tombstones.value)
+            localStorage["lists_rating_prefs"] = json.encodeToString(_ratingPrefs.value)
             if (_userEmail.value != null) {
-                localStorage["listy_user_email"] = _userEmail.value!!
+                localStorage["lists_user_email"] = _userEmail.value!!
             } else {
+                localStorage.removeItem("lists_user_email")
                 localStorage.removeItem("listy_user_email")
             }
             if (_lastSyncTime.value != null) {
-                localStorage["listy_last_sync"] = _lastSyncTime.value.toString()
+                localStorage["lists_last_sync"] = _lastSyncTime.value.toString()
             }
         } catch (e: Exception) {
             println("Error saving to localStorage: ${e.message}")
@@ -110,11 +120,13 @@ object WebStore {
     fun addList(name: String, category: Category): UserList {
         val now = currentTimeMillis()
         val maxId = _lists.value.maxOfOrNull { it.id } ?: 0L
+        val minOrder = _lists.value.minOfOrNull { it.customOrderIndex } ?: 0
         val newList = UserList(
             id = maxId + 1,
             uuid = generateUuid(),
             name = name.trim(),
             category = category.id,
+            customOrderIndex = minOrder - 1,
             createdAt = now,
             updatedAt = now
         )
@@ -133,7 +145,6 @@ object WebStore {
     fun deleteList(list: UserList) {
         val now = currentTimeMillis()
         _lists.value = _lists.value.filterNot { it.id == list.id || it.uuid == list.uuid }
-        // Also delete items in this list
         val deletedItems = _items.value.filter { it.listId == list.id || it.listUuid == list.uuid }
         _items.value = _items.value.filterNot { it.listId == list.id || it.listUuid == list.uuid }
 
@@ -143,6 +154,19 @@ object WebStore {
             newTombstones.add(Tombstone(entityUuid = item.uuid, entityType = "ITEM", deletedAt = now))
         }
         _tombstones.value = newTombstones
+        try {
+            localStorage.removeItem("view_mode_${list.id}")
+            localStorage.removeItem("lists_view_prefs_view_mode_${list.id}")
+        } catch (_: Exception) {}
+        saveToStorage()
+    }
+
+    fun reorderLists(reorderedIds: List<Long>) {
+        val map = reorderedIds.mapIndexed { idx, id -> id to idx }.toMap()
+        _lists.value = _lists.value.map { list ->
+            val order = map[list.id]
+            if (order != null) list.copy(customOrderIndex = order) else list
+        }
         saveToStorage()
     }
 
@@ -150,7 +174,7 @@ object WebStore {
         val now = currentTimeMillis()
         val maxId = _items.value.maxOfOrNull { it.id } ?: 0L
         val newItem = item.copy(
-            id = maxId + 1,
+            id = if (item.id == 0L) maxId + 1 else item.id,
             uuid = if (item.uuid.isEmpty()) generateUuid() else item.uuid,
             createdAt = if (item.createdAt == 0L) now else item.createdAt,
             updatedAt = now
@@ -175,10 +199,10 @@ object WebStore {
         saveToStorage()
     }
 
-    fun clearCompletedItems(listId: Long, listUuid: String) {
+    fun clearCompletedItems(listId: Long) {
         val now = currentTimeMillis()
         val toDelete = _items.value.filter {
-            (it.listId == listId || (listUuid.isNotEmpty() && it.listUuid == listUuid)) && (it.marked || it.status == ItemStatus.COMPLETED)
+            it.listId == listId && (it.marked || it.status == ItemStatus.COMPLETED)
         }
         if (toDelete.isEmpty()) return
 
@@ -191,16 +215,14 @@ object WebStore {
         saveToStorage()
     }
 
-    fun setRatingScale(category: Category, scale: RatingScaleOption) {
-        val newPrefs = _ratingPrefs.value.toMutableMap()
-        newPrefs["rating_scale_${category.name}"] = scale.id
-        _ratingPrefs.value = newPrefs
-        saveToStorage()
-    }
-
-    fun getRatingScale(category: Category): RatingScaleOption {
-        val id = _ratingPrefs.value["rating_scale_${category.name}"]
-        return RatingScaleOption.fromId(id, RatingScaleOption.getDefault(category))
+    fun createBackup(): BackupData {
+        return BackupData(
+            version = 1,
+            exportedAt = currentTimeMillis(),
+            lists = _lists.value,
+            items = _items.value,
+            tombstones = _tombstones.value
+        )
     }
 
     fun exportBackupJson(): String {
@@ -243,7 +265,7 @@ object WebStore {
         val localLists = _lists.value.filterNot { it.uuid in deletedListUuids }
         val remoteLists = remoteBackup.lists.filterNot { it.uuid in deletedListUuids }
 
-        val mergedListsMap = mutableMapOf<String, UserList>() // keyed by normalized name + category
+        val mergedListsMap = mutableMapOf<String, UserList>()
         for (l in localLists) {
             val key = "${l.name.trim().lowercase()}_${l.category}"
             mergedListsMap[key] = l
@@ -265,7 +287,7 @@ object WebStore {
         val localItems = _items.value.filterNot { it.uuid in deletedItemUuids }
         val remoteItems = remoteBackup.items.filterNot { it.uuid in deletedItemUuids }
 
-        val mergedItemsMap = mutableMapOf<String, ListItem>() // keyed by uuid
+        val mergedItemsMap = mutableMapOf<String, ListItem>()
         for (item in localItems) {
             mergedItemsMap[item.uuid] = item
         }
@@ -299,9 +321,15 @@ object WebStore {
     fun setAuth(email: String?) {
         _userEmail.value = email
         if (email != null) {
-            localStorage["listy_user_email"] = email
+            localStorage["lists_user_email"] = email
         } else {
+            localStorage.removeItem("lists_user_email")
             localStorage.removeItem("listy_user_email")
         }
+    }
+
+    fun setLastSync(time: Long) {
+        _lastSyncTime.value = time
+        localStorage["lists_last_sync"] = time.toString()
     }
 }

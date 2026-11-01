@@ -26,7 +26,7 @@ private val MinimalDarkColorScheme = darkColorScheme(
 )
 
 @Composable
-fun ListyTheme(
+fun ListsTheme(
     darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
@@ -47,3 +47,10 @@ fun ListyTheme(
         content = content
     )
 }
+
+@Deprecated("Use ListsTheme instead", ReplaceWith("ListsTheme(darkTheme, content)"))
+@Composable
+fun ListyTheme(
+    darkTheme: Boolean = true,
+    content: @Composable () -> Unit
+) = ListsTheme(darkTheme, content)

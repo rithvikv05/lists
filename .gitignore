@@ -8,3 +8,6 @@ wasmApp/build/
 *.iml
 .idea/
 local.properties
+*.apk
+*.xapk
+.DS_Store

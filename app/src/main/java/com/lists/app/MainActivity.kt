@@ -21,7 +21,7 @@ import com.lists.app.data.sync.GoogleSignInHelper
 import com.lists.app.data.sync.SyncWorker
 import com.lists.app.ui.screens.*
 import com.lists.app.ui.theme.PureBlack
-import com.lists.app.ui.theme.ListyTheme
+import com.lists.app.ui.theme.ListsTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {}
 
         setContent {
-            ListyTheme(darkTheme = true) {
+            ListsTheme(darkTheme = true) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = PureBlack

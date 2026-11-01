@@ -1,27 +1,30 @@
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.ComposeViewport
-import com.lists.app.data.model.ListItem
-import com.lists.app.data.model.UserList
+import com.lists.app.LocalWebContext
+import com.lists.app.WebContext
+import com.lists.app.data.repository.AppRepository
 import com.lists.app.data.store.WebStore
 import com.lists.app.data.sync.GoogleDriveSync
 import com.lists.app.ui.screens.*
-import com.lists.app.ui.theme.ListyTheme
+import com.lists.app.ui.theme.DarkBorder
+import com.lists.app.ui.theme.ListsTheme
 import com.lists.app.ui.theme.PureBlack
 import kotlinx.browser.document
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.browser.window
 
 sealed class Screen {
     object Lists : Screen()
-    data class ListDetail(val userList: UserList) : Screen()
-    data class AddItem(val userList: UserList) : Screen()
-    data class ItemDetail(val item: ListItem) : Screen()
+    data class ListDetail(val listId: Long) : Screen()
+    data class AddItem(val listId: Long) : Screen()
+    data class ItemDetail(val itemId: Long) : Screen()
     object Settings : Screen()
 }
 
@@ -43,92 +46,83 @@ fun main() {
         return
     }
 
+    val webContext = WebContext()
+    val repository = AppRepository(webContext)
+
     ComposeViewport(body) {
-        ListyTheme {
-            var currentScreen by remember { mutableStateOf<Screen>(Screen.Lists) }
-            val coroutineScope = rememberCoroutineScope()
+        CompositionLocalProvider(LocalWebContext provides webContext) {
+            ListsTheme(darkTheme = true) {
+                val backStack = remember { mutableStateListOf<Screen>(Screen.Lists) }
+                val currentScreen = backStack.lastOrNull() ?: Screen.Lists
 
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(PureBlack)
-            ) {
-                when (val screen = currentScreen) {
-                    is Screen.Lists -> {
-                        ListsScreen(
-                            onOpenList = { userList ->
-                                currentScreen = Screen.ListDetail(userList)
-                            },
-                            onOpenSettings = {
-                                currentScreen = Screen.Settings
-                            },
-                            onSyncClick = {
-                                coroutineScope.launch {
-                                    GoogleDriveSync.syncNow()
-                                }
+                // Full width responsive container
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(PureBlack)
+                ) {
+                    when (currentScreen) {
+                            is Screen.Lists -> {
+                                ListsScreen(
+                                    repository = repository,
+                                    onNavigateToListDetail = { listId ->
+                                        backStack.add(Screen.ListDetail(listId))
+                                    },
+                                    onNavigateToSettings = {
+                                        backStack.add(Screen.Settings)
+                                    }
+                                )
                             }
-                        )
-                    }
 
-                    is Screen.ListDetail -> {
-                        ListDetailScreen(
-                            userList = screen.userList,
-                            onBack = {
-                                currentScreen = Screen.Lists
-                            },
-                            onAddItem = {
-                                currentScreen = Screen.AddItem(screen.userList)
-                            },
-                            onOpenItem = { item ->
-                                currentScreen = Screen.ItemDetail(item)
+                            is Screen.ListDetail -> {
+                                ListDetailScreen(
+                                    listId = currentScreen.listId,
+                                    repository = repository,
+                                    onNavigateBack = {
+                                        if (backStack.size > 1) backStack.removeAt(backStack.size - 1)
+                                    },
+                                    onNavigateToItemDetail = { itemId ->
+                                        backStack.add(Screen.ItemDetail(itemId))
+                                    },
+                                    onNavigateToAddItem = { listId ->
+                                        backStack.add(Screen.AddItem(listId))
+                                    }
+                                )
                             }
-                        )
-                    }
 
-                    is Screen.AddItem -> {
-                        AddItemScreen(
-                            userList = screen.userList,
-                            onBack = {
-                                currentScreen = Screen.ListDetail(screen.userList)
-                            },
-                            onItemAdded = {
-                                currentScreen = Screen.ListDetail(screen.userList)
+                            is Screen.AddItem -> {
+                                AddItemScreen(
+                                    listId = currentScreen.listId,
+                                    repository = repository,
+                                    onNavigateBack = {
+                                        if (backStack.size > 1) backStack.removeAt(backStack.size - 1)
+                                    }
+                                )
                             }
-                        )
-                    }
 
-                    is Screen.ItemDetail -> {
-                        ItemDetailScreen(
-                            item = screen.item,
-                            onBack = {
-                                val lists = WebStore.lists.value
-                                val parentList = lists.firstOrNull { it.id == screen.item.listId || it.uuid == screen.item.listUuid }
-                                if (parentList != null) {
-                                    currentScreen = Screen.ListDetail(parentList)
-                                } else {
-                                    currentScreen = Screen.Lists
-                                }
+                            is Screen.ItemDetail -> {
+                                ItemDetailScreen(
+                                    itemId = currentScreen.itemId,
+                                    repository = repository,
+                                    onNavigateBack = {
+                                        if (backStack.size > 1) backStack.removeAt(backStack.size - 1)
+                                    }
+                                )
                             }
-                        )
-                    }
 
-                    is Screen.Settings -> {
-                        SettingsScreen(
-                            onBack = {
-                                currentScreen = Screen.Lists
-                            },
-                            onConnectDrive = {
-                                GoogleDriveSync.requestSignIn { }
-                            },
-                            onSyncNow = {
-                                coroutineScope.launch {
-                                    GoogleDriveSync.syncNow()
-                                }
+                            is Screen.Settings -> {
+                                SettingsScreen(
+                                    repository = repository,
+                                    onNavigateBack = {
+                                        if (backStack.size > 1) backStack.removeAt(backStack.size - 1)
+                                    }
+                                )
                             }
-                        )
                     }
                 }
             }
         }
     }
 }
+
+

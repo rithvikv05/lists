@@ -1,11 +1,11 @@
 package com.lists.app.data.model
 
-import kotlin.math.roundToInt
+import com.lists.app.formatDecimal1
 
 sealed class DisplayBadge {
     data class Text(val label: String) : DisplayBadge()
     data class Numeric(val value: Float, val isOutOfTen: Boolean) : DisplayBadge() {
-        val formatted: String get() = ((value * 10).roundToInt() / 10f).toString()
+        val formatted: String get() = formatDecimal1(value)
     }
 }
 
@@ -67,73 +67,47 @@ object RatingConverter {
     }
 
     fun fivePointToTenPoint(rating: Float): Float {
-        return (rating * 2f).coerceIn(0f, 10f)
+        return (rating * 2.0f).coerceIn(0f, 10f)
     }
 
     fun tenPointToFivePoint(rating: Float): Float {
-        return (rating / 2f).coerceIn(0f, 5f)
+        return (rating / 2.0f).coerceIn(0f, 5f)
     }
 
-    fun isRatedByUser(item: ListItem): Boolean {
-        return (item.reviewRating in 1..4) || (item.userRating > 0f)
-    }
-
-    fun getUserRatingScore(item: ListItem): Float {
-        if (!isRatedByUser(item)) return -1f
-        if (item.userRating > 0f) {
-            return if (item.userRating <= 5.0f && item.reviewRating in 1..4 && fourWordToFivePoint(item.reviewRating) == item.userRating) {
-                item.userRating * 2f
-            } else if (item.userRating <= 5.0f) {
-                item.userRating * 2f
-            } else {
-                item.userRating
-            }
-        }
-        return fourWordToTenPoint(item.reviewRating)
-    }
-
-    fun getDisplayBadge(item: ListItem, scale: RatingScaleOption): DisplayBadge? {
-        if (!isRatedByUser(item)) {
-            return null
-        }
-
+    fun getBadge(item: ListItem, scale: RatingScaleOption): DisplayBadge? {
         return when (scale) {
             RatingScaleOption.SKIP_PERFECTION -> {
-                val label = if (item.reviewRating in 1..4) {
-                    getReviewLabel(item.reviewRating)
-                } else if (item.userRating > 5.0f) {
-                    getReviewLabel(tenPointToFourWord(item.userRating))
-                } else {
-                    getReviewLabel(fivePointToFourWord(item.userRating))
+                val label = when {
+                    item.reviewRating > 0 -> getReviewLabel(item.reviewRating)
+                    item.userRating > 0f -> getReviewLabel(fivePointToFourWord(item.userRating))
+                    else -> null
                 }
-                if (label != null) DisplayBadge.Text(label) else null
+                label?.let { DisplayBadge.Text(it) }
             }
-
             RatingScaleOption.SCALE_5 -> {
-                val value = if (item.userRating > 0f) {
-                    if (item.userRating > 5.0f) {
-                        tenPointToFivePoint(item.userRating)
-                    } else {
-                        item.userRating
-                    }
-                } else {
-                    fourWordToFivePoint(item.reviewRating)
+                val num = when {
+                    item.userRating > 0f -> item.userRating
+                    item.reviewRating > 0 -> fourWordToFivePoint(item.reviewRating)
+                    else -> null
                 }
-                DisplayBadge.Numeric(value, isOutOfTen = false)
+                num?.let { DisplayBadge.Numeric(it, isOutOfTen = false) }
             }
-
             RatingScaleOption.SCALE_10 -> {
-                val value = if (item.userRating > 0f) {
-                    if (item.userRating <= 5.0f) {
-                        fivePointToTenPoint(item.userRating)
-                    } else {
-                        item.userRating
-                    }
-                } else {
-                    fourWordToTenPoint(item.reviewRating)
+                val num = when {
+                    item.userRating > 0f -> fivePointToTenPoint(item.userRating)
+                    item.reviewRating > 0 -> fourWordToTenPoint(item.reviewRating)
+                    else -> null
                 }
-                DisplayBadge.Numeric(value, isOutOfTen = true)
+                num?.let { DisplayBadge.Numeric(it, isOutOfTen = true) }
             }
         }
+    }
+
+    fun getDisplayBadge(item: ListItem, scale: RatingScaleOption): DisplayBadge? = getBadge(item, scale)
+
+    fun getUserRatingScore(item: ListItem): Float {
+        if (item.userRating > 0f) return item.userRating
+        if (item.reviewRating > 0) return fourWordToFivePoint(item.reviewRating)
+        return 0f
     }
 }

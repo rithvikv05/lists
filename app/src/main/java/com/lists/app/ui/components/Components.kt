@@ -6,10 +6,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,8 +35,10 @@ import com.lists.app.data.model.RatingConverter
 import com.lists.app.data.model.RatingScaleOption
 import com.lists.app.data.db.ListItem
 import com.lists.app.data.model.Category
+import com.lists.app.data.storage.OfflineStorageManager
 import com.lists.app.ui.screens.triggerStrongTick
 import com.lists.app.ui.theme.*
+import java.io.File
 
 @Composable
 fun CategoryIcon(
@@ -53,8 +59,20 @@ fun PosterImage(
     url: String,
     category: Category,
     modifier: Modifier = Modifier,
-    aspectRatio: Float = 2f / 3f
+    aspectRatio: Float = 2f / 3f,
+    uuid: String = ""
 ) {
+    val context = LocalContext.current
+    val imageModel = remember(url, uuid) {
+        if (uuid.isNotEmpty()) {
+            OfflineStorageManager.getInstance(context).getDisplayCover(uuid, url)
+        } else {
+            url
+        }
+    }
+    val hasValidCover = (imageModel is File && imageModel.exists() && imageModel.length() > 0) ||
+                        (imageModel is String && imageModel.isNotEmpty())
+
     Box(
         modifier = modifier
             .aspectRatio(aspectRatio)
@@ -63,10 +81,10 @@ fun PosterImage(
             .border(0.5.dp, DarkBorder, RoundedCornerShape(6.dp)),
         contentAlignment = Alignment.Center
     ) {
-        if (url.isNotEmpty()) {
+        if (hasValidCover) {
             AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(url)
+                model = ImageRequest.Builder(context)
+                    .data(imageModel)
                     .crossfade(true)
                     .build(),
                 contentDescription = null,
@@ -84,7 +102,82 @@ fun PosterImage(
     }
 }
 
-// Exactly reproduces item_item_grid.xml from Listy
+@Composable
+fun ItemContextMenu(
+    expanded: Boolean,
+    item: ListItem,
+    category: Category,
+    onDismissRequest: () -> Unit,
+    onTogglePin: (() -> Unit)?,
+    onToggleMarked: () -> Unit,
+    onDelete: (() -> Unit)?
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        shape = RoundedCornerShape(12.dp),
+        containerColor = DarkCardElevated,
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, DarkBorder)
+    ) {
+        if (onTogglePin != null) {
+            DropdownMenuItem(
+                text = { Text(if (item.pinned) "Unpin" else "Pin to top", color = TextWhite, fontSize = 14.sp) },
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_pin),
+                        contentDescription = null,
+                        tint = if (item.pinned) AccentWhite else TextGrayMedium,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismissRequest()
+                    onTogglePin()
+                }
+            )
+        }
+        val watchedLabel = when (category) {
+            Category.BOOK -> if (item.marked) "Mark as Unread" else "Mark as Read"
+            Category.GAME -> if (item.marked) "Mark as Incomplete" else "Mark as Completed"
+            else -> if (item.marked) "Mark as Unwatched" else "Mark as Watched"
+        }
+        DropdownMenuItem(
+            text = { Text(watchedLabel, color = TextWhite, fontSize = 14.sp) },
+            leadingIcon = {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_marked),
+                    contentDescription = null,
+                    tint = if (item.marked) TextGrayMedium else AccentWhite,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            onClick = {
+                onDismissRequest()
+                onToggleMarked()
+            }
+        )
+        if (onDelete != null) {
+            DropdownMenuItem(
+                text = { Text("Delete", color = Color(0xFFFF453A), fontSize = 14.sp) },
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_delete),
+                        contentDescription = "Delete",
+                        tint = Color(0xFFFF453A),
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = {
+                    onDismissRequest()
+                    onDelete()
+                }
+            )
+        }
+    }
+}
+
+// Exactly reproduces item_item_grid.xml in Lists app
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ItemGridCard(
     item: ListItem,
@@ -92,9 +185,12 @@ fun ItemGridCard(
     onClick: () -> Unit,
     onToggleMarked: () -> Unit,
     modifier: Modifier = Modifier,
+    onTogglePin: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
     activeScale: RatingScaleOption? = null
 ) {
     val context = LocalContext.current
+    var showMenu by remember { mutableStateOf(false) }
     val ratingPrefs = remember { context.getSharedPreferences("lists_rating_prefs", Context.MODE_PRIVATE) }
     val scale = activeScale ?: run {
         val defaultScale = RatingScaleOption.getDefault(category)
@@ -102,12 +198,31 @@ fun ItemGridCard(
         RatingScaleOption.fromId(saved, defaultScale)
     }
 
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(2.dp)
-    ) {
+    Box(modifier = modifier) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                            if (event.buttons.isSecondaryPressed && event.changes.any { it.pressed }) {
+                                triggerStrongTick(context)
+                                showMenu = true
+                            }
+                        }
+                    }
+                }
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = {
+                        triggerStrongTick(context)
+                        showMenu = true
+                    }
+                )
+                .padding(2.dp)
+        ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -116,10 +231,15 @@ fun ItemGridCard(
                 .background(DarkCardElevated)
                 .border(0.5.dp, DarkBorder, RoundedCornerShape(6.dp))
         ) {
-            if (item.coverUrl.isNotEmpty()) {
+            val displayCover = remember(item.uuid, item.coverUrl) {
+                OfflineStorageManager.getInstance(context).getDisplayCover(item.uuid, item.coverUrl)
+            }
+            val hasValidCover = (displayCover is File && displayCover.exists() && displayCover.length() > 0) ||
+                                (displayCover is String && displayCover.isNotEmpty())
+            if (hasValidCover) {
                 AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(item.coverUrl)
+                    model = ImageRequest.Builder(context)
+                        .data(displayCover)
                         .crossfade(true)
                         .build(),
                     contentDescription = item.title,
@@ -209,7 +329,7 @@ fun ItemGridCard(
                 }
             }
 
-            // Bottom-right: Checkmark / Marked icon (matching bg_marked_icon.xml from Listy)
+            // Bottom-right: Checkmark / Marked icon (matching bg_marked_icon.xml in Lists app)
             IconButton(
                 onClick = {
                     triggerStrongTick(context)
@@ -269,9 +389,34 @@ fun ItemGridCard(
             )
         }
     }
+
+    ItemContextMenu(
+        expanded = showMenu,
+        item = item,
+        category = category,
+        onDismissRequest = { showMenu = false },
+        onTogglePin = onTogglePin?.let { pinAction ->
+            {
+                triggerStrongTick(context)
+                pinAction()
+            }
+        },
+        onToggleMarked = {
+            triggerStrongTick(context)
+            onToggleMarked()
+        },
+        onDelete = onDelete?.let { deleteAction ->
+            {
+                triggerStrongTick(context)
+                deleteAction()
+            }
+        }
+    )
+}
 }
 
-// Exactly reproduces item_item_list_checkable.xml from Listy
+// Exactly reproduces item_item_list_checkable.xml in Lists app
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ItemListRow(
     item: ListItem,
@@ -279,9 +424,12 @@ fun ItemListRow(
     onClick: () -> Unit,
     onToggleMarked: () -> Unit,
     modifier: Modifier = Modifier,
+    onTogglePin: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
     activeScale: RatingScaleOption? = null
 ) {
     val context = LocalContext.current
+    var showMenu by remember { mutableStateOf(false) }
     val ratingPrefs = remember { context.getSharedPreferences("lists_rating_prefs", Context.MODE_PRIVATE) }
     val scale = activeScale ?: run {
         val defaultScale = RatingScaleOption.getDefault(category)
@@ -289,143 +437,186 @@ fun ItemListRow(
         RatingScaleOption.fromId(saved, defaultScale)
     }
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .background(DarkCardBg)
-            .border(0.5.dp, DarkBorder, RoundedCornerShape(8.dp))
-            .padding(10.dp)
-    ) {
-        PosterImage(
-            url = item.coverUrl,
-            category = category,
+    Box(modifier = modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .width(46.dp)
-                .clip(RoundedCornerShape(6.dp))
-        )
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (item.pinned) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_pin),
-                        contentDescription = "Pinned",
-                        tint = TextWhite,
-                        modifier = Modifier
-                            .size(13.dp)
-                            .padding(end = 4.dp)
-                    )
-                }
-                Text(
-                    text = item.title,
-                    color = if (item.marked) TextGrayMedium else TextWhite,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            Spacer(modifier = Modifier.height(2.dp))
-
-            val meta = buildString {
-                if (item.releaseYear.isNotEmpty()) append(item.releaseYear)
-                if (item.creator.isNotEmpty()) {
-                    if (isNotEmpty()) append(" • ")
-                    append(item.creator)
-                }
-            }
-            if (meta.isNotEmpty()) {
-                Text(
-                    text = meta,
-                    color = TextGrayMedium,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            val badge = RatingConverter.getDisplayBadge(item, scale)
-            if (badge != null) {
-                Surface(
-                    color = DarkCardElevated,
-                    shape = RoundedCornerShape(4.dp),
-                    border = androidx.compose.foundation.BorderStroke(0.5.dp, DarkBorder),
-                    modifier = Modifier.padding(top = 2.dp)
-                ) {
-                    when (badge) {
-                        is DisplayBadge.Text -> {
-                            Text(
-                                text = badge.label,
-                                color = TextWhite,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                            )
-                        }
-                        is DisplayBadge.Numeric -> {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Star,
-                                    contentDescription = null,
-                                    tint = TextWhite,
-                                    modifier = Modifier.size(9.dp)
-                                )
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text(
-                                    text = badge.formatted,
-                                    color = TextWhite,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                            if (event.buttons.isSecondaryPressed && event.changes.any { it.pressed }) {
+                                triggerStrongTick(context)
+                                showMenu = true
                             }
                         }
                     }
                 }
-            }
-
-            if (category == Category.TV_SHOW && item.currentEpisode > 0) {
-                Text(
-                    text = "S${item.currentSeason} E${item.currentEpisode}${if (item.totalEpisodes > 0) "/${item.totalEpisodes}" else ""}",
-                    color = TextGrayLight,
-                    fontSize = 11.sp
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = {
+                        triggerStrongTick(context)
+                        showMenu = true
+                    }
                 )
-            } else if (category == Category.BOOK && item.currentPage > 0) {
-                Text(
-                    text = "Page ${item.currentPage}${if (item.totalPages > 0) "/${item.totalPages}" else ""}",
-                    color = TextGrayLight,
-                    fontSize = 11.sp
-                )
-            }
-        }
+                .background(DarkCardBg)
+                .border(0.5.dp, DarkBorder, RoundedCornerShape(8.dp))
+                .padding(10.dp)
+        ) {
+            PosterImage(
+                url = item.coverUrl,
+                category = category,
+                modifier = Modifier
+                    .width(46.dp)
+                    .clip(RoundedCornerShape(6.dp)),
+                uuid = item.uuid
+            )
 
-        IconButton(onClick = {
-            triggerStrongTick(context)
-            onToggleMarked()
-        }) {
-            Surface(
-                color = if (item.marked) TextWhite else PureBlack,
-                shape = CircleShape,
-                border = if (item.marked) null else CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(DarkBorder)),
-                modifier = Modifier.size(24.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_marked),
-                        contentDescription = null,
-                        tint = if (item.marked) PureBlack else TextGrayDark,
-                        modifier = Modifier.size(13.dp)
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (item.pinned) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_pin),
+                            contentDescription = "Pinned",
+                            tint = TextWhite,
+                            modifier = Modifier
+                                .size(13.dp)
+                                .padding(end = 4.dp)
+                        )
+                    }
+                    Text(
+                        text = item.title,
+                        color = if (item.marked) TextGrayMedium else TextWhite,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                val meta = buildString {
+                    if (item.releaseYear.isNotEmpty()) append(item.releaseYear)
+                    if (item.creator.isNotEmpty()) {
+                        if (isNotEmpty()) append(" • ")
+                        append(item.creator)
+                    }
+                }
+                if (meta.isNotEmpty()) {
+                    Text(
+                        text = meta,
+                        color = TextGrayMedium,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                val badge = RatingConverter.getDisplayBadge(item, scale)
+                if (badge != null) {
+                    Surface(
+                        color = DarkCardElevated,
+                        shape = RoundedCornerShape(4.dp),
+                        border = androidx.compose.foundation.BorderStroke(0.5.dp, DarkBorder),
+                        modifier = Modifier.padding(top = 2.dp)
+                    ) {
+                        when (badge) {
+                            is DisplayBadge.Text -> {
+                                Text(
+                                    text = badge.label,
+                                    color = TextWhite,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                            is DisplayBadge.Numeric -> {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Star,
+                                        contentDescription = null,
+                                        tint = TextWhite,
+                                        modifier = Modifier.size(9.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Text(
+                                        text = badge.formatted,
+                                        color = TextWhite,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (category == Category.TV_SHOW && item.currentEpisode > 0) {
+                    Text(
+                        text = "S${item.currentSeason} E${item.currentEpisode}${if (item.totalEpisodes > 0) "/${item.totalEpisodes}" else ""}",
+                        color = TextGrayLight,
+                        fontSize = 11.sp
+                    )
+                } else if (category == Category.BOOK && item.currentPage > 0) {
+                    Text(
+                        text = "Page ${item.currentPage}${if (item.totalPages > 0) "/${item.totalPages}" else ""}",
+                        color = TextGrayLight,
+                        fontSize = 11.sp
                     )
                 }
             }
+
+            IconButton(onClick = {
+                triggerStrongTick(context)
+                onToggleMarked()
+            }) {
+                Surface(
+                    color = if (item.marked) TextWhite else PureBlack,
+                    shape = CircleShape,
+                    border = if (item.marked) null else CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(DarkBorder)),
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_marked),
+                            contentDescription = null,
+                            tint = if (item.marked) PureBlack else TextGrayDark,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                }
+            }
         }
+
+        ItemContextMenu(
+            expanded = showMenu,
+            item = item,
+            category = category,
+            onDismissRequest = { showMenu = false },
+            onTogglePin = onTogglePin?.let { pinAction ->
+                {
+                    triggerStrongTick(context)
+                    pinAction()
+                }
+            },
+            onToggleMarked = {
+                triggerStrongTick(context)
+                onToggleMarked()
+            },
+            onDelete = onDelete?.let { deleteAction ->
+                {
+                    triggerStrongTick(context)
+                    deleteAction()
+                }
+            }
+        )
     }
 }

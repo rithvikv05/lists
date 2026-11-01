@@ -10,12 +10,22 @@ import org.json.JSONObject
  */
 class TombstoneManager(context: Context) {
     companion object {
-        private const val PREFS_NAME = "listy_tombstones"
+        private const val PREFS_NAME = "lists_tombstones"
+        private const val LEGACY_PREFS_NAME = "listy_tombstones"
         private const val KEY_DELETED_LISTS = "deleted_lists_json"
         private const val KEY_DELETED_ITEMS = "deleted_items_json"
     }
 
-    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).also { newPrefs ->
+        // Migrate legacy tombstones if new is empty
+        val legacy = context.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
+        if (!newPrefs.contains(KEY_DELETED_LISTS) && legacy.contains(KEY_DELETED_LISTS)) {
+            newPrefs.edit()
+                .putString(KEY_DELETED_LISTS, legacy.getString(KEY_DELETED_LISTS, null))
+                .putString(KEY_DELETED_ITEMS, legacy.getString(KEY_DELETED_ITEMS, null))
+                .apply()
+        }
+    }
 
     fun recordDeletedList(uuid: String, timestamp: Long = System.currentTimeMillis()) {
         if (uuid.isBlank()) return

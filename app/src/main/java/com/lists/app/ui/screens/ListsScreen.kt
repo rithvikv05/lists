@@ -297,7 +297,7 @@ fun ListsScreen(
                                 )
                             }
                     ) {
-                        ListyGridTile(
+                        ListsGridTile(
                             listWithStats = item,
                             isDragging = isDraggingThis,
                             isHoverTarget = isHoverTarget,
@@ -350,9 +350,9 @@ fun ListsScreen(
     }
 }
 
-// Exactly reproduces item_list.xml from Listy with 3-dots menu & clean hover target border
+// Clean grid tile with 3-dots menu & hover target border
 @Composable
-fun ListyGridTile(
+fun ListsGridTile(
     listWithStats: ListWithStats,
     isDragging: Boolean = false,
     isHoverTarget: Boolean = false,

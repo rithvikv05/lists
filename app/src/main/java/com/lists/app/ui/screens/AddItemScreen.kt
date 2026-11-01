@@ -490,12 +490,23 @@ fun AddItemScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(searchResults) { result ->
-                        val alreadyInList = existingItems.any { it.title.equals(result.title, ignoreCase = true) }
+                        val alreadyInList = existingItems.any { existing ->
+                            val urlMatches = (result.externalUrl.isNotEmpty() && existing.externalUrl.isNotEmpty() && existing.externalUrl == result.externalUrl) ||
+                                    (result.coverUrl.isNotEmpty() && existing.coverUrl.isNotEmpty() && existing.coverUrl == result.coverUrl)
+                            val titleMatches = existing.title.trim().equals(result.title.trim(), ignoreCase = true)
+                            val resYearDigits = result.releaseYear.filter { it.isDigit() }.take(4)
+                            val existYearDigits = existing.releaseYear.filter { it.isDigit() }.take(4)
+                            val yearMatches = resYearDigits.isNotEmpty() && existYearDigits.isNotEmpty() && resYearDigits == existYearDigits
+                            val creatorMatches = result.creator.isNotBlank() && existing.creator.isNotBlank() && existing.creator.equals(result.creator, ignoreCase = true)
+                            val bothDetailsEmpty = result.releaseYear.isBlank() && existing.releaseYear.isBlank() && result.creator.isBlank() && existing.creator.isBlank()
+
+                            urlMatches || (titleMatches && (yearMatches || creatorMatches || bothDetailsEmpty))
+                        }
 
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable(enabled = !alreadyInList) {
+                                .clickable {
                                     scope.launch {
                                         repository.addItemFromSearch(listId, result)
                                         snackbarHostState.showSnackbar("Added '${result.title}'")
@@ -575,11 +586,20 @@ fun AddItemScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
 
                                 if (alreadyInList) {
-                                    Text(
-                                        text = "Added",
-                                        fontSize = 12.sp,
-                                        color = TextGrayMedium
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Added",
+                                            fontSize = 11.sp,
+                                            color = TextGrayMedium
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_add),
+                                            contentDescription = "Add again",
+                                            tint = TextGrayMedium,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 } else {
                                     Icon(
                                         painter = painterResource(id = R.drawable.ic_add),

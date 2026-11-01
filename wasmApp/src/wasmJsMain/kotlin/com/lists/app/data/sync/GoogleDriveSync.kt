@@ -1,5 +1,6 @@
 package com.lists.app.data.sync
 
+import com.lists.app.currentTimeMillis
 import com.lists.app.data.model.BackupData
 import com.lists.app.data.store.WebStore
 import io.ktor.client.*
@@ -7,7 +8,6 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.browser.localStorage
-import kotlinx.browser.window
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -22,16 +22,32 @@ object GoogleDriveSync {
     private val json = Json { ignoreUnknownKeys = true }
 
     private var accessToken: String?
-        get() = localStorage["listy_access_token"]
+        get() = localStorage["lists_access_token"] ?: localStorage["listy_access_token"]
         set(value) {
-            if (value != null) localStorage["listy_access_token"] = value else localStorage.removeItem("listy_access_token")
+            if (value != null) {
+                localStorage["lists_access_token"] = value
+            } else {
+                localStorage.removeItem("lists_access_token")
+                localStorage.removeItem("listy_access_token")
+            }
         }
+
+    fun getUserEmail(): String? = WebStore.userEmail.value
+    fun getLastSyncTime(): Long? = WebStore.lastSyncTime.value
+    fun setLastSyncTime(time: Long) {
+        WebStore.setLastSync(time)
+    }
 
     fun init() {
         val token = accessToken
         if (token != null) {
             fetchUserInfoAndSync(token)
         }
+    }
+
+    fun signOut() {
+        accessToken = null
+        WebStore.setAuth(null)
     }
 
     fun requestSignIn(onComplete: (Boolean) -> Unit) {
@@ -70,8 +86,8 @@ object GoogleDriveSync {
         val token = accessToken ?: return false
 
         return try {
-            // 1. Search for existing listy_backup.json in appDataFolder
-            val searchUrl = "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='listy_backup.json'%20and%20trashed=false&fields=files(id,name,modifiedTime)"
+            // Check lists_sync.json, listy_sync.json, and backup files
+            val searchUrl = "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=(name='lists_sync.json'%20or%20name='listy_sync.json'%20or%20name='lists_backup.json'%20or%20name='listy_backup.json')%20and%20trashed=false&fields=files(id,name,modifiedTime)"
             val searchResp = client.get(searchUrl) {
                 header(HttpHeaders.Authorization, "Bearer $token")
             }.bodyAsText()
@@ -82,7 +98,6 @@ object GoogleDriveSync {
             val fileId = existingFile?.get("id")?.jsonPrimitive?.content
 
             if (fileId != null) {
-                // Download remote backup
                 val downloadUrl = "https://www.googleapis.com/drive/v3/files/$fileId?alt=media"
                 val downloadResp = client.get(downloadUrl) {
                     header(HttpHeaders.Authorization, "Bearer $token")
@@ -92,31 +107,31 @@ object GoogleDriveSync {
                     val remoteJson = downloadResp.bodyAsText()
                     try {
                         val remoteBackup = json.decodeFromString<BackupData>(remoteJson)
-                        // Merge bidirectional
                         val mergedBackup = WebStore.mergeFromRemote(remoteBackup)
                         val mergedJson = json.encodeToString(BackupData.serializer(), mergedBackup)
 
-                        // Upload updated merged content
                         val uploadUrl = "https://www.googleapis.com/upload/drive/v3/files/$fileId?uploadType=media"
                         client.patch(uploadUrl) {
                             header(HttpHeaders.Authorization, "Bearer $token")
-                            contentType(ContentType.Application.Json)
+                            header(HttpHeaders.ContentType, "application/json")
                             setBody(mergedJson)
                         }
                     } catch (e: Exception) {
-                        println("Failed to parse remote backup: ${e.message}")
+                        println("Decode error: ${e.message}")
                     }
                 }
             } else {
-                // Upload initial local backup
-                val localJson = WebStore.exportBackupJson()
-                val metadata = """{"name": "listy_backup.json", "parents": ["appDataFolder"]}"""
-                val boundary = "-------314159265358979323846"
+                val localBackup = WebStore.createBackup()
+                val localJson = json.encodeToString(BackupData.serializer(), localBackup)
+
+                val boundary = "foo_bar_baz"
                 val delimiter = "\r\n--$boundary\r\n"
                 val closeDelimiter = "\r\n--$boundary--"
 
+                val metadata = "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+                        """{"name": "lists_sync.json", "parents": ["appDataFolder"]}"""
+
                 val multipartBody = delimiter +
-                        "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
                         metadata +
                         delimiter +
                         "Content-Type: application/json\r\n\r\n" +
@@ -130,6 +145,7 @@ object GoogleDriveSync {
                     setBody(multipartBody)
                 }
             }
+            WebStore.setLastSync(currentTimeMillis())
             true
         } catch (e: Exception) {
             println("Sync failed: ${e.message}")
@@ -160,4 +176,3 @@ private fun jsInitTokenClient(clientId: String, scopes: String): Unit = js("""{
 private fun jsRegisterTokenCallback(callback: (String) -> Unit): Unit = js("""{
     window.__onGoogleToken = callback;
 }""")
-
