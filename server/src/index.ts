@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { logger } from 'hono/logger';
 import {
   Category,
   BookSubFilter,
@@ -98,6 +99,9 @@ type Bindings = {
 
 const app = new Hono<{ Bindings: Bindings }>();
 
+// Global request logger for Wrangler real-time tails
+app.use('*', logger());
+
 // Enable CORS for all origins (Android native & Web Wasm)
 app.use('*', cors({
   origin: '*',
@@ -129,11 +133,15 @@ function collectSettled(settled: PromiseSettledResult<SearchResult[]>[]): Search
 // UNIVERSAL SEARCH ENDPOINT: /v1/search
 // -----------------------------------------------------------------------
 app.get('/v1/search', async (c) => {
+  const startTime = Date.now();
   const q = (c.req.query('q') || '').trim();
   const category = (c.req.query('category') || 'MOVIE').toUpperCase() as Category;
   const subFilter = (c.req.query('subFilter') || 'ALL').toUpperCase() as BookSubFilter & TvSubFilter;
   const explicitYear = c.req.query('year');
   const lang = c.req.query('lang');
+
+  const clientUA = c.req.header('User-Agent') || 'UnknownClient';
+  console.log(`[EdgeSearch] [INCOMING] category=${category} q="${q}" subFilter=${subFilter} client="${clientUA}"`);
 
   if (!q) {
     return c.json({ error: 'Query parameter q is required' }, 400);
@@ -148,6 +156,7 @@ app.get('/v1/search', async (c) => {
   // 1. Check multi-tier edge cache
   const cached = getCachedSearch(cacheKey);
   if (cached) {
+    console.log(`[EdgeSearch] [CACHE-HIT] q="${q}" -> ${cached.length} items (${Date.now() - startTime}ms)`);
     return c.json<SearchResponse>({
       query: q,
       normalizedQuery: searchCleanQuery,
@@ -366,6 +375,8 @@ app.get('/v1/search', async (c) => {
 
   // 5. Update multi-tier cache
   setCachedSearch(cacheKey, ranked);
+
+  console.log(`[EdgeSearch] [RESPONSE] q="${q}" -> ${ranked.length} items (${Date.now() - startTime}ms, source: live)`);
 
   return c.json<SearchResponse>({
     query: q,

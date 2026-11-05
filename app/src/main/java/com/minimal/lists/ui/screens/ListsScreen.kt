@@ -99,8 +99,10 @@ fun ListsScreen(
     var searchQuery by remember { mutableStateOf("") }
     var showSearchBar by remember { mutableStateOf(false) }
 
+    var lastTrigger by remember { mutableStateOf(searchTrigger) }
     LaunchedEffect(searchTrigger) {
-        if (searchTrigger > 0) {
+        if (searchTrigger != lastTrigger) {
+            lastTrigger = searchTrigger
             showSearchBar = !showSearchBar
             if (!showSearchBar) {
                 focusManager.clearFocus()
@@ -149,6 +151,15 @@ fun ListsScreen(
 
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
+
+    val openList: (Long) -> Unit = { listId ->
+        if (showSearchBar) {
+            focusManager.clearFocus()
+            showSearchBar = false
+            searchQuery = ""
+        }
+        onNavigateToListDetail(listId)
+    }
 
     LaunchedEffect(Unit) {
         signedInAccount = signInHelper.getSignedInAccount()
@@ -503,7 +514,7 @@ fun ListsScreen(
                                 itemCount = listWithStats.itemCount,
                                 completedCount = listWithStats.completedCount,
                                 isPinned = listWithStats.list.pinned,
-                                onClick = { onNavigateToListDetail(listWithStats.list.id) },
+                                onClick = { openList(listWithStats.list.id) },
                                 onLongClick = {
                                     triggerStrongTick(context)
                                     listForOptionsSheet = listWithStats.list
@@ -529,7 +540,7 @@ fun ListsScreen(
                                 itemCount = listWithStats.itemCount,
                                 completedCount = listWithStats.completedCount,
                                 isPinned = listWithStats.list.pinned,
-                                onClick = { onNavigateToListDetail(listWithStats.list.id) },
+                                onClick = { openList(listWithStats.list.id) },
                                 onLongClick = {
                                     triggerStrongTick(context)
                                     listForOptionsSheet = listWithStats.list

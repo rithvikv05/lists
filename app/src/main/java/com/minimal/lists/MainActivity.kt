@@ -359,6 +359,7 @@ fun AppNavigation(
                 ListsScreen(
                     repository = repository,
                     onNavigateToListDetail = { listId ->
+                        searchTriggerDetail = 0
                         navController.navigate("listDetail/$listId")
                     },
                     onNavigateToSettings = {
@@ -377,7 +378,10 @@ fun AppNavigation(
                 ListDetailScreen(
                     listId = listId,
                     repository = repository,
-                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateBack = {
+                        searchTriggerDetail = 0
+                        navController.popBackStack()
+                    },
                     onNavigateToItemDetail = { itemId ->
                         navController.navigate("itemDetail/$itemId")
                     },

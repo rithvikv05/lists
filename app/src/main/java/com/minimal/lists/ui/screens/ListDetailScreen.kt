@@ -110,8 +110,10 @@ fun ListDetailScreen(
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
+    var lastTrigger by remember { mutableStateOf(searchTrigger) }
     LaunchedEffect(searchTrigger) {
-        if (searchTrigger > 0) {
+        if (searchTrigger != lastTrigger) {
+            lastTrigger = searchTrigger
             isSearchActive = !isSearchActive
             if (!isSearchActive) {
                 focusManager.clearFocus()

@@ -299,6 +299,7 @@ fun main() {
                                             ListsScreen(
                                                 repository = repository,
                                                 onNavigateToListDetail = { listId ->
+                                                    searchTriggerDetail = 0
                                                     backStack.add(Screen.ListDetail(listId))
                                                 },
                                                 onNavigateToSettings = {
@@ -313,6 +314,7 @@ fun main() {
                                                 listId = currentScreen.listId,
                                                 repository = repository,
                                                 onNavigateBack = {
+                                                    searchTriggerDetail = 0
                                                     if (backStack.size > 1) backStack.removeAt(backStack.size - 1)
                                                 },
                                                 onNavigateToItemDetail = { itemId ->
