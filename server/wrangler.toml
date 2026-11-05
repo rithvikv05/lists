@@ -1,0 +1,13 @@
+name = "lists-search-engine"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Production environment variables (optional keys for deeper access)
+[vars]
+ENVIRONMENT = "production"
+OMDB_API_KEY = "trilogy"
+# HARDCOVER_API_TOKEN = "" # Set via wrangler secret put HARDCOVER_API_TOKEN
+# TWITCH_CLIENT_ID = ""    # Set via wrangler secret put TWITCH_CLIENT_ID
+# TWITCH_CLIENT_SECRET = "" # Set via wrangler secret put TWITCH_CLIENT_SECRET
+

@@ -10,6 +10,7 @@ import io.ktor.client.statement.*
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 
@@ -250,6 +251,7 @@ object FuzzyMatcher {
 
 class SearchRepository {
     companion object {
+        var remoteEngineUrl: String = "https://lists-search-engine.workers.dev/v1"
         private val searchCache = mutableMapOf<String, List<SearchResult>>()
         private val inFlightRequests = mutableMapOf<String, Deferred<List<SearchResult>>>()
         private val negativeCache = mutableMapOf<String, Long>()
@@ -258,6 +260,52 @@ class SearchRepository {
 
     private val client = HttpClient()
     private val json = Json { ignoreUnknownKeys = true }
+
+    private suspend fun fetchFromRemoteEngine(
+        query: String,
+        category: Category,
+        subFilter: String = "ALL",
+        year: String? = null,
+        lang: String? = null
+    ): List<SearchResult>? {
+        if (remoteEngineUrl.isBlank()) return null
+        return try {
+            val qEncoded = encodeURIComponent(query)
+            val yearParam = if (!year.isNullOrBlank()) "&year=${encodeURIComponent(year)}" else ""
+            val langParam = if (!lang.isNullOrBlank()) "&lang=${encodeURIComponent(lang)}" else ""
+            val url = "$remoteEngineUrl/search?q=$qEncoded&category=${category.name}&subFilter=$subFilter$yearParam$langParam"
+
+            val response = client.get(url).bodyAsText()
+            val root = json.parseToJsonElement(response).jsonObject
+            val arr = root["results"]?.jsonArray ?: return null
+            val list = mutableListOf<SearchResult>()
+            for (elem in arr) {
+                val obj = elem.jsonObject
+                val title = obj["title"]?.jsonPrimitive?.content ?: continue
+                val catStr = obj["category"]?.jsonPrimitive?.content ?: category.name
+                val parsedCat = try { Category.valueOf(catStr) } catch (_: Exception) { category }
+
+                list.add(
+                    SearchResult(
+                        title = title,
+                        creator = obj["creator"]?.jsonPrimitive?.content ?: "",
+                        releaseYear = obj["releaseYear"]?.jsonPrimitive?.content ?: "",
+                        releaseDate = obj["releaseDate"]?.jsonPrimitive?.content ?: "",
+                        coverUrl = obj["coverUrl"]?.jsonPrimitive?.content ?: "",
+                        overview = obj["overview"]?.jsonPrimitive?.content ?: "",
+                        rating = obj["rating"]?.jsonPrimitive?.doubleOrNull?.toFloat() ?: 0f,
+                        totalEpisodes = obj["totalEpisodes"]?.jsonPrimitive?.intOrNull ?: 0,
+                        totalPages = obj["totalPages"]?.jsonPrimitive?.intOrNull ?: 0,
+                        category = parsedCat,
+                        externalUrl = obj["externalUrl"]?.jsonPrimitive?.content ?: ""
+                    )
+                )
+            }
+            if (list.isNotEmpty()) list else null
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     private fun isValidSearchResult(item: SearchResult): Boolean {
         val title = item.title.trim()
@@ -380,6 +428,21 @@ class SearchRepository {
 
         return coroutineScope {
             val deferred = async {
+                // Try standalone edge search engine first (2200ms timeout)
+                val subFilter = when (category) {
+                    Category.BOOK -> bookSubFilter.name
+                    Category.TV_SHOW -> tvSubFilter.name
+                    else -> "ALL"
+                }
+                val remoteResults = withTimeoutOrNull(2200) {
+                    fetchFromRemoteEngine(searchCleanQuery, category, subFilter, effectiveYear, selectedLanguage)
+                }
+                if (!remoteResults.isNullOrEmpty()) {
+                    searchCache[cacheKey] = remoteResults
+                    return@async remoteResults
+                }
+
+                // Seamless fallback to embedded local providers if remote is unavailable
                 val raw = try {
                     when (category) {
                         Category.MOVIE -> searchMovies(searchCleanQuery, effectiveYear)
