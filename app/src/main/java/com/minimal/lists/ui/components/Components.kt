@@ -1673,11 +1673,17 @@ fun ListMediaRow(
     onToggleComplete: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val isLight = MaterialTheme.colorScheme.surface.luminance() > 0.5f
+    val cardBg = if (selected) {
+        if (isLight) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+        else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+    } else MaterialTheme.colorScheme.surfaceContainerLow
+
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerLow,
-        shadowElevation = 1.dp,
-        border = if (selected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+        color = cardBg,
+        shadowElevation = if (selected) 0.dp else 1.dp,
+        border = if (selected) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
@@ -1731,6 +1737,17 @@ fun ListMediaRow(
             }
 
             Spacer(modifier = Modifier.width(8.dp))
+
+            // Show Pin Icon if pinned (similar to homepage)
+            if (item.pinned && !selected) {
+                Icon(
+                    imageVector = Icons.Default.PushPin,
+                    contentDescription = "Pinned",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+            }
 
             // Multi-select check badge
             if (selected) {

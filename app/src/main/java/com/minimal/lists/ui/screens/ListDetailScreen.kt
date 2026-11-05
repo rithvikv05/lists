@@ -383,7 +383,7 @@ fun ListDetailScreen(
                                 Icon(
                                     imageVector = Icons.Default.Delete,
                                     contentDescription = "Delete",
-                                    tint = MaterialTheme.colorScheme.error
+                                    tint = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
@@ -579,7 +579,7 @@ fun ListDetailScreen(
                                         text = filter.displayName,
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -936,20 +936,23 @@ fun ListDetailScreen(
             }
 
             // SINGLE TITLE THAT PHYSICALLY FLOWS AND SHRINKS/EXPANDS BETWEEN BODY AND HEADER (Phone / Portrait only)
-            if (!isWideLayout && selectedItemIds.isEmpty()) {
-                Text(
-                    text = list?.name ?: "List",
-                    fontSize = titleFontSize,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = titleLetterSpacing,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .offset(x = titleX, y = titleY)
-                        .widthIn(max = titleMaxWidth)
-                )
+            if (!isWideLayout) {
+                val selectionFadeAlpha = if (selectedItemIds.isNotEmpty()) (1f - effectiveProgress * 1.5f).coerceIn(0f, 1f) else 1f
+                if (selectionFadeAlpha > 0f) {
+                    Text(
+                        text = list?.name ?: "List",
+                        fontSize = titleFontSize,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = titleLetterSpacing,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = selectionFadeAlpha),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .offset(x = titleX, y = titleY)
+                            .widthIn(max = titleMaxWidth)
+                    )
+                }
             }
         }
     }

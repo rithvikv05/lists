@@ -274,148 +274,154 @@ fun ListsScreen(
             }
         }
     ) { padding ->
-        Box(
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = onPullRefresh,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .then(
-                    if (showSearchBar) {
-                        Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
-                            focusManager.clearFocus()
-                            showSearchBar = false
-                            searchQuery = ""
-                        }
-                    } else Modifier
-                ),
-            contentAlignment = Alignment.TopCenter
         ) {
-            Column(
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
                     .fillMaxSize()
-                    .padding(horizontal = if (isWideLayout) 24.dp else 16.dp)
-            ) {
-                // Top Header Row matching Stitch Screen #11 & #23 with zero extra black gap
-                if (selectedListIds.isNotEmpty()) {
-                    val selectedLists = displayedLists.filter { selectedListIds.contains(it.list.id) }.map { it.list }
-                    val anyUnpinned = selectedLists.any { !it.pinned }
-                    val anyUnarchived = selectedLists.any { !it.isArchived }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(top = 16.dp, bottom = 8.dp)
-                            .height(44.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f, fill = false)
-                        ) {
-                            IconButton(
-                                onClick = {
-                                    triggerStrongTick(context)
-                                    selectedListIds = emptySet()
-                                },
-                                modifier = Modifier.size(38.dp)
+                    .then(
+                        if (showSearchBar) {
+                            Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(20.dp))
+                                focusManager.clearFocus()
+                                showSearchBar = false
+                                searchQuery = ""
                             }
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "${selectedListIds.size} selected",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                        } else Modifier
+                    ),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxSize()
+                        .padding(horizontal = if (isWideLayout) 24.dp else 16.dp)
+                ) {
+                    // Top Header Row matching Stitch Screen #11 & #23 with zero extra black gap
+                    if (selectedListIds.isNotEmpty()) {
+                        val selectedLists = displayedLists.filter { selectedListIds.contains(it.list.id) }.map { it.list }
+                        val anyUnpinned = selectedLists.any { !it.pinned }
+                        val anyUnarchived = selectedLists.any { !it.isArchived }
 
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(top = 16.dp, bottom = 8.dp)
+                                .height(44.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Edit List (visible when exactly 1 list is selected)
-                            if (selectedListIds.size == 1) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
                                 IconButton(
                                     onClick = {
                                         triggerStrongTick(context)
-                                        val list = selectedLists.firstOrNull()
-                                        if (list != null) {
-                                            listToEdit = list
+                                        selectedListIds = emptySet()
+                                    },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(20.dp))
+                                }
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text(
+                                    text = "${selectedListIds.size} selected",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(1.dp)
+                            ) {
+                                // Edit List (visible when exactly 1 list is selected)
+                                if (selectedListIds.size == 1) {
+                                    IconButton(
+                                        onClick = {
+                                            triggerStrongTick(context)
+                                            val list = selectedLists.firstOrNull()
+                                            if (list != null) {
+                                                listToEdit = list
+                                                selectedListIds = emptySet()
+                                            }
+                                        },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit List", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp))
+                                    }
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        triggerAsmrTick(context)
+                                        selectedListIds = if (selectedListIds.size == displayedLists.size) emptySet() else displayedLists.map { it.list.id }.toSet()
+                                    },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(Icons.Default.SelectAll, contentDescription = "Select All", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(19.dp))
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        triggerStrongTick(context)
+                                        scope.launch {
+                                            repository.setListsPinned(selectedLists, anyUnpinned)
                                             selectedListIds = emptySet()
                                         }
                                     },
-                                    modifier = Modifier.size(38.dp)
+                                    modifier = Modifier.size(34.dp)
                                 ) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Edit List", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.PushPin,
+                                        contentDescription = if (anyUnpinned) "Pin" else "Unpin",
+                                        tint = if (anyUnpinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        triggerStrongTick(context)
+                                        scope.launch {
+                                            repository.setListsArchived(selectedLists, anyUnarchived)
+                                            selectedListIds = emptySet()
+                                        }
+                                    },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isArchiveSelected) Icons.Default.Unarchive else Icons.Default.Archive,
+                                        contentDescription = if (isArchiveSelected) "Unarchive" else "Archive",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        triggerStrongTick(context)
+                                        showBulkDeleteDialog = true
+                                    },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp))
                                 }
                             }
-
-                            IconButton(
-                                onClick = {
-                                    triggerAsmrTick(context)
-                                    selectedListIds = if (selectedListIds.size == displayedLists.size) emptySet() else displayedLists.map { it.list.id }.toSet()
-                                },
-                                modifier = Modifier.size(38.dp)
-                            ) {
-                                Icon(Icons.Default.SelectAll, contentDescription = "Select All", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(20.dp))
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    triggerStrongTick(context)
-                                    scope.launch {
-                                        repository.setListsPinned(selectedLists, anyUnpinned)
-                                        selectedListIds = emptySet()
-                                    }
-                                },
-                                modifier = Modifier.size(38.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PushPin,
-                                    contentDescription = if (anyUnpinned) "Pin" else "Unpin",
-                                    tint = if (anyUnpinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    triggerStrongTick(context)
-                                    scope.launch {
-                                        repository.setListsArchived(selectedLists, anyUnarchived)
-                                        selectedListIds = emptySet()
-                                    }
-                                },
-                                modifier = Modifier.size(38.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isArchiveSelected) Icons.Default.Unarchive else Icons.Default.Archive,
-                                    contentDescription = if (isArchiveSelected) "Unarchive" else "Archive",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    triggerStrongTick(context)
-                                    showBulkDeleteDialog = true
-                                },
-                                modifier = Modifier.size(38.dp)
-                            ) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
-                            }
                         }
-                    }
-                } else {
+                    } else {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -706,6 +712,7 @@ fun ListsScreen(
             }
         }
     }
+}
 }
 
     // Scalable Category Selector Modal (Stitch #00 & #06)
