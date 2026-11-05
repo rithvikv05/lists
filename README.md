@@ -15,12 +15,18 @@ If you love movies, binge TV series, read books and comics, follow seasonal anim
 
 ## Key Features
 
-### 🔍 Universal Media Aggregator
+### 🔍 Universal Media Aggregator & Search Engine
 Fetch accurate metadata, release years, cover artwork, and progress breakdowns across virtually any medium:
-- **Movies & TV Shows**: Seasons, episode counts, release dates, runtime, high-resolution posters, and individual season/episode tracking.
-- **Books & Comics**: Authors, page counts, publishers, release years, and book jacket covers.
-- **Anime & Manga**: Total episodes, chapters, volumes, serialization status, and artwork.
-- **Video Games & Board Games**: Release years, supported platforms, developer details, and playtime tracking.
+- **Intelligent Query Normalization**: Automatic 4-digit release year extraction (`"Dune 1984"`), bi-directional Roman numeral mapping (`"Final Fantasy VII"` $\leftrightarrow$ `"Final Fantasy 7"`), diacritic folding (`Pokémon` $\rightarrow$ `Pokemon`), and leading article filtering.
+- **Typo Tolerance & Fuzzy Scoring**: Sub-string Levenshtein edit distance and word-order-invariant token Jaccard similarity to rank relevant results instantly.
+- **Parallel Provider Pipeline**:
+  - **Movies**: Primary: iTunes Movies (`1200x1200bb`) & IMDb Suggestions; Fallback: OMDb API & Wikipedia.
+  - **TV Shows & Anime**: TVMaze, AniList GraphQL (English + Romaji + Native Japanese titles), MangaDex, JustWatch.
+  - **Books**: Primary: Apple Books (`1200x1200bb`); Backup: Open Library (`-L.jpg`); Fallback: Hardcover GraphQL & Google Books.
+  - **Comics**: Cataloggd / Grand Comics Database (GCD), GetComics, Apple Books, and Google Books.
+  - **Video Games**: IMDb Suggestions (video games), Steam Store, and Wikipedia.
+  - **Board Games**: Dedicated Wikipedia Board Game search with 600px box art, Wikidata tabletop entities, and BoardGameGeek.
+- **Request Coalescing & Negative Caching**: In-flight concurrency coalescing and 10-minute negative caching for empty queries to eliminate redundant network load.
 - **Custom / Manual Entries**: Manually track any item with custom titles, notes, external links, and your own cover images.
 
 ---
@@ -106,3 +112,4 @@ The compiled WebAssembly distribution will be output to:
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+

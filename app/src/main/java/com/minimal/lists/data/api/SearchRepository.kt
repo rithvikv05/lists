@@ -1,5 +1,6 @@
 package com.minimal.lists.data.api
 
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -18,6 +19,7 @@ import com.minimal.lists.data.model.Category
 import com.minimal.lists.data.model.SearchResult
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 enum class BookSubFilter(val label: String) {
@@ -53,9 +55,220 @@ data class EpisodeItem(
     val key: String get() = "S${season}E${number}"
 }
 
+object QueryNormalizer {
+    data class NormalizedQuery(
+        val original: String,
+        val cleanQuery: String,
+        val extractedYear: String?,
+        val variants: List<String>
+    )
+
+    private val YEAR_REGEX = Regex("""\b(19\d{2}|20\d{2})\b""")
+
+    private val ROMAN_TO_ARABIC = listOf(
+        Regex("""\bVIII\b""", RegexOption.IGNORE_CASE) to "8",
+        Regex("""\bVII\b""", RegexOption.IGNORE_CASE) to "7",
+        Regex("""\bIII\b""", RegexOption.IGNORE_CASE) to "3",
+        Regex("""\bIV\b""", RegexOption.IGNORE_CASE) to "4",
+        Regex("""\bIX\b""", RegexOption.IGNORE_CASE) to "9",
+        Regex("""\bVI\b""", RegexOption.IGNORE_CASE) to "6",
+        Regex("""\bII\b""", RegexOption.IGNORE_CASE) to "2",
+        Regex("""\bV\b""", RegexOption.IGNORE_CASE) to "5",
+        Regex("""\bX\b""", RegexOption.IGNORE_CASE) to "10",
+        Regex("""\bI\b""", RegexOption.IGNORE_CASE) to "1"
+    )
+
+    private val ARABIC_TO_ROMAN = listOf(
+        Regex("""\b10\b""") to "X",
+        Regex("""\b9\b""") to "IX",
+        Regex("""\b8\b""") to "VIII",
+        Regex("""\b7\b""") to "VII",
+        Regex("""\b6\b""") to "VI",
+        Regex("""\b5\b""") to "V",
+        Regex("""\b4\b""") to "IV",
+        Regex("""\b3\b""") to "III",
+        Regex("""\b2\b""") to "II",
+        Regex("""\b1\b""") to "I"
+    )
+
+    fun foldDiacritics(str: String): String {
+        val sb = java.lang.StringBuilder(str.length)
+        for (ch in str) {
+            val replacement = when (ch) {
+                'á', 'à', 'â', 'ä', 'ã', 'å', 'ā' -> 'a'
+                'Á', 'À', 'Â', 'Ä', 'Ã', 'Å', 'Ā' -> 'A'
+                'é', 'è', 'ê', 'ë', 'ē', 'ė', 'ę' -> 'e'
+                'É', 'È', 'Ê', 'Ë', 'Ē', 'Ė', 'Ę' -> 'E'
+                'í', 'ì', 'î', 'ï', 'ī', 'į' -> 'i'
+                'Í', 'Ì', 'Î', 'Ï', 'Ī', 'Į' -> 'I'
+                'ó', 'ò', 'ô', 'ö', 'õ', 'ō', 'ø' -> 'o'
+                'Ó', 'Ò', 'Ô', 'Ö', 'Õ', 'Ō', 'Ø' -> 'O'
+                'ú', 'ù', 'û', 'ü', 'ū' -> 'u'
+                'Ú', 'Ù', 'Û', 'Ü', 'Ū' -> 'U'
+                'ñ' -> 'n'; 'Ñ' -> 'N'
+                'ç' -> 'c'; 'Ç' -> 'C'
+                'ý', 'ÿ' -> 'y'; 'Ý' -> 'Y'
+                'š' -> 's'; 'Š' -> 'S'
+                'ž' -> 'z'; 'Ž' -> 'Z'
+                else -> ch
+            }
+            sb.append(replacement)
+        }
+        return sb.toString()
+    }
+
+    fun stripLeadingArticles(str: String): String {
+        val lower = str.trim()
+        val articles = listOf("the ", "a ", "an ", "der ", "die ", "das ", "le ", "la ", "les ", "el ", "los ")
+        for (art in articles) {
+            if (lower.startsWith(art, ignoreCase = true)) {
+                return lower.substring(art.length).trim()
+            }
+        }
+        return lower
+    }
+
+    fun normalize(input: String): NormalizedQuery {
+        val trimmed = input.trim()
+        val folded = foldDiacritics(trimmed)
+        val yearMatch = YEAR_REGEX.find(folded)
+        val extractedYear = yearMatch?.value
+        val cleanQuery = if (extractedYear != null) {
+            folded.replace(extractedYear, "").replace(Regex("""\s+"""), " ").trim()
+        } else {
+            folded
+        }
+
+        val variants = mutableListOf<String>()
+        variants.add(cleanQuery)
+
+        var toArabic = cleanQuery
+        for ((roman, arabic) in ROMAN_TO_ARABIC) {
+            toArabic = toArabic.replace(roman, arabic)
+        }
+        if (toArabic != cleanQuery && !variants.contains(toArabic)) {
+            variants.add(toArabic)
+        }
+
+        var toRoman = cleanQuery
+        for ((arabic, roman) in ARABIC_TO_ROMAN) {
+            toRoman = toRoman.replace(arabic, roman)
+        }
+        if (toRoman != cleanQuery && !variants.contains(toRoman)) {
+            variants.add(toRoman)
+        }
+
+        return NormalizedQuery(
+            original = trimmed,
+            cleanQuery = cleanQuery.ifBlank { trimmed },
+            extractedYear = extractedYear,
+            variants = variants
+        )
+    }
+}
+
+object FuzzyMatcher {
+    fun levenshteinDistance(s1: String, s2: String): Int {
+        val a = s1.lowercase()
+        val b = s2.lowercase()
+        if (a == b) return 0
+        if (a.isEmpty()) return b.length
+        if (b.isEmpty()) return a.length
+
+        val dp = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prev = dp[0]
+            dp[0] = i
+            for (j in 1..b.length) {
+                val temp = dp[j]
+                dp[j] = if (a[i - 1] == b[j - 1]) prev else minOf(prev, dp[j], dp[j - 1]) + 1
+                prev = temp
+            }
+        }
+        return dp[b.length]
+    }
+
+    fun tokenJaccardSimilarity(s1: String, s2: String): Double {
+        val t1 = s1.lowercase().split(Regex("""[^a-z0-9]+""")).filter { it.isNotBlank() }.toSet()
+        val t2 = s2.lowercase().split(Regex("""[^a-z0-9]+""")).filter { it.isNotBlank() }.toSet()
+        if (t1.isEmpty() || t2.isEmpty()) return 0.0
+        val intersection = t1.intersect(t2).size
+        val union = t1.union(t2).size
+        return intersection.toDouble() / union.toDouble()
+    }
+
+    fun calculateRelevance(
+        query: String,
+        cleanQuery: String,
+        extractedYear: String?,
+        result: SearchResult
+    ): Double {
+        val titleLower = result.title.lowercase().trim()
+        val cleanQLower = cleanQuery.lowercase().trim()
+        val origQLower = query.lowercase().trim()
+
+        var score = 0.0
+
+        // Exact match
+        if (titleLower == cleanQLower || titleLower == origQLower) {
+            score += 100.0
+        } else if (titleLower.startsWith(cleanQLower) || titleLower.startsWith(origQLower)) {
+            score += 65.0
+        } else if (titleLower.contains(cleanQLower) || titleLower.contains(origQLower)) {
+            score += 40.0
+        }
+
+        // Stripped article match (e.g. "The Matrix" matching "Matrix")
+        val strippedTitle = QueryNormalizer.stripLeadingArticles(titleLower)
+        val strippedCleanQ = QueryNormalizer.stripLeadingArticles(cleanQLower)
+        if (strippedTitle == strippedCleanQ) {
+            score += 85.0
+        } else if (strippedTitle.startsWith(strippedCleanQ)) {
+            score += 55.0
+        }
+
+        // Word token Jaccard similarity (order-invariant matching)
+        val jaccard = tokenJaccardSimilarity(titleLower, cleanQLower)
+        score += jaccard * 45.0
+
+        // Typo tolerance via Levenshtein if length is close
+        val maxLen = maxOf(titleLower.length, cleanQLower.length)
+        if (maxLen > 3 && kotlin.math.abs(titleLower.length - cleanQLower.length) <= 3) {
+            val dist = levenshteinDistance(titleLower.take(cleanQLower.length), cleanQLower)
+            if (dist == 1) score += 28.0
+            else if (dist == 2) score += 14.0
+        }
+
+        // Creator match
+        if (result.creator.isNotBlank()) {
+            val creatorLower = result.creator.lowercase()
+            if (creatorLower.contains(cleanQLower) || creatorLower.contains(origQLower)) {
+                score += 35.0
+            }
+        }
+
+        // Year alignment bonus
+        if (!extractedYear.isNullOrBlank()) {
+            if (result.releaseYear.contains(extractedYear) || result.releaseDate.contains(extractedYear)) {
+                score += 40.0
+            }
+        }
+
+        // Quality attributes
+        if (result.coverUrl.isNotBlank()) score += 12.0
+        if (result.overview.isNotBlank()) score += 8.0
+        if (result.rating > 0f) score += (result.rating / 10f) * 6.0
+
+        return score
+    }
+}
+
 class SearchRepository {
     companion object {
-        private val searchCache = object : android.util.LruCache<String, List<SearchResult>>(150) {}
+        private val searchCache = object : android.util.LruCache<String, List<SearchResult>>(200) {}
+        private val inFlightRequests = ConcurrentHashMap<String, Deferred<List<SearchResult>>>()
+        private val negativeCache = ConcurrentHashMap<String, Long>()
+        private const val NEGATIVE_CACHE_TTL_MS = 10 * 60 * 1000L // 10 minutes
     }
 
     private val client = OkHttpClient.Builder()
@@ -294,6 +507,39 @@ class SearchRepository {
         return itemYear.contains(cleanFilter)
     }
 
+    private fun isValidSearchResult(item: SearchResult): Boolean {
+        val title = item.title.trim()
+        if (title.isBlank()) return false
+        val lower = title.lowercase()
+        if (lower == "not found" || lower == "error" || lower == "404" ||
+            lower.startsWith("list of ") || lower.startsWith("lists of ") ||
+            lower.contains("(disambiguation)")) {
+            return false
+        }
+        return item.coverUrl.isNotBlank() || item.overview.isNotBlank() ||
+               item.creator.isNotBlank() || item.releaseYear.isNotBlank()
+    }
+
+    private fun enhanceCoverUrl(url: String): String {
+        if (url.isBlank()) return ""
+        var enhanced = url
+        if (enhanced.contains("apple.com") || enhanced.contains("mzstatic.com")) {
+            enhanced = enhanced.replace("100x100bb.", "1200x1200bb.")
+                .replace("600x600bb.", "1200x1200bb.")
+                .replace("800x800bb.", "1200x1200bb.")
+        } else if (enhanced.contains("media-amazon.com")) {
+            enhanced = enhanced.replace(Regex("""\._V1_.*\.jpg"""), "._V1_SX1200.jpg")
+        } else if (enhanced.contains("books.google.com")) {
+            enhanced = enhanced.replace("http://", "https://")
+                .replace("&edge=curl", "")
+                .replace("zoom=1", "zoom=3")
+                .replace("zoom=2", "zoom=3")
+        } else if (enhanced.contains("covers.openlibrary.org")) {
+            enhanced = enhanced.replace("-M.jpg", "-L.jpg").replace("-S.jpg", "-L.jpg")
+        }
+        return enhanced
+    }
+
     suspend fun search(
         query: String,
         category: Category,
@@ -306,9 +552,6 @@ class SearchRepository {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return@withContext emptyList()
 
-        val cacheKey = "$category|$bookSubFilter|$tvSubFilter|$bookSearchType|$yearFilter|$langFilter|${trimmed.lowercase()}"
-        searchCache.get(cacheKey)?.let { return@withContext it }
-
         if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
             val scraped = scrapeUrl(trimmed, category)
             if (scraped != null) {
@@ -316,61 +559,90 @@ class SearchRepository {
             }
         }
 
-        val rawResults = try {
-            when (category) {
-                Category.MOVIE -> searchMovies(trimmed, yearFilter, langFilter)
-                Category.TV_SHOW -> searchTvAndAnime(trimmed, TvSubFilter.TV_SHOWS, yearFilter, langFilter)
-                Category.ANIME -> searchTvAndAnime(trimmed, TvSubFilter.ANIME, yearFilter, langFilter)
-                Category.BOOK -> searchBooksAndManga(trimmed, BookSubFilter.BOOKS, bookSearchType, yearFilter, langFilter)
-                Category.MANGA -> searchBooksAndManga(trimmed, BookSubFilter.MANGA, bookSearchType, yearFilter, langFilter)
-                Category.COMIC -> searchBooksAndManga(trimmed, BookSubFilter.COMICS, bookSearchType, yearFilter, langFilter)
-                Category.GAME -> searchGames(trimmed, yearFilter, langFilter)
-                Category.BOARD_GAME -> searchGames(trimmed, yearFilter, langFilter)
-                Category.PODCAST, Category.MUSIC -> searchWikipedia(trimmed, category)
+        val norm = QueryNormalizer.normalize(trimmed)
+        val effectiveYear = yearFilter ?: norm.extractedYear
+        val searchCleanQuery = norm.cleanQuery
+
+        val cacheKey = "$category|$bookSubFilter|$tvSubFilter|$bookSearchType|$effectiveYear|$langFilter|${searchCleanQuery.lowercase()}"
+
+        // 1. Positive cache hit
+        searchCache.get(cacheKey)?.let { return@withContext it }
+
+        // 2. Negative cache hit (10 min TTL for empty queries)
+        val negTimestamp = negativeCache[cacheKey]
+        if (negTimestamp != null) {
+            if (System.currentTimeMillis() - negTimestamp < NEGATIVE_CACHE_TTL_MS) {
+                return@withContext emptyList()
+            } else {
+                negativeCache.remove(cacheKey)
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        }
+
+        // 3. Request Coalescing: join in-flight search if already pending
+        val activeDeferred = inFlightRequests[cacheKey]
+        if (activeDeferred != null) {
+            return@withContext activeDeferred.await()
+        }
+
+        // 4. Execute search across parallel providers
+        coroutineScope {
+            val deferred = async(Dispatchers.IO) {
+                val rawResults = try {
+                    when (category) {
+                        Category.MOVIE -> searchMovies(searchCleanQuery, effectiveYear, langFilter)
+                        Category.TV_SHOW -> searchTvAndAnime(searchCleanQuery, TvSubFilter.TV_SHOWS, effectiveYear, langFilter)
+                        Category.ANIME -> searchTvAndAnime(searchCleanQuery, TvSubFilter.ANIME, effectiveYear, langFilter)
+                        Category.BOOK -> searchBooksAndManga(searchCleanQuery, BookSubFilter.BOOKS, bookSearchType, effectiveYear, langFilter)
+                        Category.MANGA -> searchBooksAndManga(searchCleanQuery, BookSubFilter.MANGA, bookSearchType, effectiveYear, langFilter)
+                        Category.COMIC -> searchBooksAndManga(searchCleanQuery, BookSubFilter.COMICS, bookSearchType, effectiveYear, langFilter)
+                        Category.GAME -> searchGames(searchCleanQuery, effectiveYear, langFilter)
+                        Category.BOARD_GAME -> searchBoardGames(searchCleanQuery, effectiveYear, langFilter)
+                        Category.PODCAST, Category.MUSIC -> searchWikipedia(searchCleanQuery, category)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    try {
+                        searchWikipedia(searchCleanQuery, category)
+                    } catch (ex: Exception) {
+                        emptyList()
+                    }
+                }
+
+                // Minimum completeness validation
+                val validResults = rawResults.filter { isValidSearchResult(it) }
+
+                // Smart deduplication & entity field merging
+                val merged = deduplicateSearchResults(validResults)
+
+                // Fuzzy relevance scoring & ranking
+                val ranked = merged.sortedByDescending { item ->
+                    FuzzyMatcher.calculateRelevance(trimmed, searchCleanQuery, effectiveYear, item)
+                }.take(40)
+
+                if (ranked.isNotEmpty()) {
+                    searchCache.put(cacheKey, ranked)
+                    negativeCache.remove(cacheKey)
+                } else {
+                    negativeCache[cacheKey] = System.currentTimeMillis()
+                }
+
+                ranked
+            }
+
+            inFlightRequests[cacheKey] = deferred
             try {
-                searchWikipedia(trimmed, category)
-            } catch (ex: Exception) {
-                emptyList()
+                deferred.await()
+            } finally {
+                inFlightRequests.remove(cacheKey)
             }
         }
-
-        val yearFiltered = if (!yearFilter.isNullOrBlank()) {
-            val (matched, unmatched) = rawResults.partition {
-                matchesYear(it.releaseYear, yearFilter) || matchesYear(it.releaseDate, yearFilter)
-            }
-            if (matched.isNotEmpty()) matched + unmatched else rawResults
-        } else {
-            rawResults
-        }
-
-        // Relevance scoring & smart sorting so best matches always appear first
-        val lowerQ = trimmed.lowercase()
-        val sorted = yearFiltered.sortedWith(
-            compareByDescending<SearchResult> { item ->
-                val titleLower = item.title.lowercase()
-                var score = 0
-                if (titleLower == lowerQ) score += 100
-                else if (titleLower.startsWith(lowerQ)) score += 50
-                else if (titleLower.contains(lowerQ)) score += 25
-                if (item.creator.lowercase().contains(lowerQ)) score += 30
-                if (item.coverUrl.isNotBlank()) score += 10
-                if (item.rating > 0f) score += 5
-                score
-            }
-        )
-        val deduped = deduplicateSearchResults(sorted).take(40)
-        searchCache.put(cacheKey, deduped)
-        deduped
     }
 
     private fun cleanCanonicalTitle(rawTitle: String): String {
         return rawTitle
             .replace(Regex("(?i)(?:,\\s*)?(?:season|series|part|vol\\.?|volume)\\s*\\d+.*$"), "")
             .replace(Regex("(?i)(?:the final season|complete series|box set).*$"), "")
-            .replace(Regex("(?i)\\s*\\((?:tv series|tv show|series|film|movie|anime|manga|novel|comic|video game|game|\\d{4})\\)"), "")
+            .replace(Regex("(?i)\\s*\\((?:tv series|tv show|series|film|movie|anime|manga|novel|comic|video game|board game|game|\\d{4})\\)"), "")
             .trim()
     }
 
@@ -396,7 +668,6 @@ class SearchRepository {
                 } else {
                     val existingYear = existing.releaseYear.filter { it.isDigit() }.take(4).toIntOrNull()
                     if (itemYear != null && existingYear != null) {
-                        // Same item if years are within 1 year
                         kotlin.math.abs(itemYear - existingYear) <= 1
                     } else {
                         true
@@ -404,7 +675,8 @@ class SearchRepository {
                 }
             }
 
-            val cleanedItem = item.copy(title = canonicalTitle)
+            val enhancedCover = enhanceCoverUrl(item.coverUrl)
+            val cleanedItem = item.copy(title = canonicalTitle, coverUrl = enhancedCover)
 
             if (existingIndex == -1) {
                 mergedList.add(cleanedItem)
@@ -832,6 +1104,58 @@ class SearchRepository {
         return results
     }
 
+    private fun searchImdbMovies(
+        query: String,
+        yearFilter: String? = null,
+        langFilter: String? = null
+    ): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        try {
+            val qSanitized = query.trim().lowercase().replace(Regex("[^a-z0-9]+"), "_")
+            if (qSanitized.isBlank()) return emptyList()
+            val url = "https://v3.sg.media-imdb.com/suggestion/x/$qSanitized.json"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0")
+                .build()
+            client.newCall(req).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val root = JSONObject(body)
+                    val arr = root.optJSONArray("d") ?: JSONArray()
+                    for (i in 0 until arr.length()) {
+                        val item = arr.getJSONObject(i)
+                        val id = item.optString("id")
+                        val title = item.optString("l")
+                        val year = item.optString("y")
+                        val qType = item.optString("q").lowercase()
+                        if (qType == "video game" || qType == "podcast") continue
+                        val stars = item.optString("s")
+                        val imgObj = item.optJSONObject("i")
+                        var cover = imgObj?.optString("imageUrl") ?: ""
+                        if (cover.isNotBlank()) {
+                            cover = cover.replace(Regex("""\._V1_.*\.jpg"""), "._V1_SX1200.jpg")
+                        }
+                        if (title.isNotBlank()) {
+                            results.add(
+                                SearchResult(
+                                    title = title,
+                                    creator = stars,
+                                    releaseYear = year,
+                                    releaseDate = year,
+                                    coverUrl = cover,
+                                    category = Category.MOVIE,
+                                    externalUrl = if (id.isNotBlank()) "https://www.imdb.com/title/$id" else ""
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return results
+    }
+
     fun searchJustWatch(
         query: String,
         expectedType: String? = null,
@@ -989,14 +1313,18 @@ class SearchRepository {
     }
 
     // -------------------------------------------------------------
-    // MOVIES: iTunes Fast Search + JustWatch + OMDb Parallel with Wikipedia fallback
+    // MOVIES: iTunes Fast Search + IMDb Suggestions + JustWatch + OMDb Fallback
     // -------------------------------------------------------------
     private suspend fun searchMovies(query: String, yearFilter: String? = null, langFilter: String? = null): List<SearchResult> = coroutineScope {
         val encoded = URLEncoder.encode(query, "UTF-8")
         val yearParam = if (!yearFilter.isNullOrBlank()) "&y=${URLEncoder.encode(yearFilter.trim(), "UTF-8")}" else ""
 
+        // 1. Primary providers: iTunes & IMDb Suggestions
         val itunesDeferred = async { withTimeoutOrNull(2500) { searchITunesMovies(query, yearFilter, langFilter) } ?: emptyList() }
+        val imdbDeferred = async { withTimeoutOrNull(2500) { searchImdbMovies(query, yearFilter, langFilter) } ?: emptyList() }
         val justWatchDeferred = async { withTimeoutOrNull(2500) { searchJustWatch(query, "MOVIE", Category.MOVIE, langFilter) } ?: emptyList() }
+
+        // 2. Fallback provider: OMDb API
         val omdbDeferred = async {
             withTimeoutOrNull(2500) {
                 val results = mutableListOf<SearchResult>()
@@ -1025,6 +1353,7 @@ class SearchRepository {
                                         SearchResult(
                                             title = cleanCanonicalTitle(title),
                                             releaseYear = year,
+                                            releaseDate = year,
                                             coverUrl = poster,
                                             category = Category.MOVIE,
                                             externalUrl = if (imdbId.isNotEmpty()) "https://www.imdb.com/title/$imdbId" else ""
@@ -1039,7 +1368,7 @@ class SearchRepository {
             } ?: emptyList()
         }
 
-        val allResults = itunesDeferred.await() + justWatchDeferred.await() + omdbDeferred.await()
+        val allResults = itunesDeferred.await() + imdbDeferred.await() + justWatchDeferred.await() + omdbDeferred.await()
         if (allResults.size < 6) {
             val wiki = withTimeoutOrNull(1800) { searchWikipedia(query, Category.MOVIE) } ?: emptyList()
             allResults + wiki
@@ -1364,14 +1693,17 @@ class SearchRepository {
     ): List<SearchResult> = coroutineScope {
         val deferredList = when (subFilter) {
             BookSubFilter.BOOKS -> listOf(
-                async { withTimeoutOrNull(2600) { searchGoogleBooks(query, langFilter, bookSearchType) } ?: emptyList() },
+                async { withTimeoutOrNull(2600) { searchAppleBooks(query, langFilter) } ?: emptyList() },
                 async { withTimeoutOrNull(2600) { searchOpenLibrary(query, bookSearchType, langFilter) } ?: emptyList() },
-                async { withTimeoutOrNull(2600) { searchAppleBooks(query, langFilter) } ?: emptyList() }
+                async { withTimeoutOrNull(2600) { searchHardcover(query) } ?: emptyList() },
+                async { withTimeoutOrNull(2600) { searchGoogleBooks(query, langFilter, bookSearchType) } ?: emptyList() }
             )
             BookSubFilter.COMICS -> listOf(
+                async { withTimeoutOrNull(2600) { searchComicDb(query) } ?: emptyList() },
                 async { withTimeoutOrNull(2600) { searchGetComics(query) } ?: emptyList() },
+                async { withTimeoutOrNull(2600) { searchAppleBooks("$query comic", langFilter) } ?: emptyList() },
                 async { withTimeoutOrNull(2600) { searchGoogleBooks("$query comic", langFilter, bookSearchType, isComic = true) } ?: emptyList() },
-                async { withTimeoutOrNull(2600) { searchAppleBooks("$query comic", langFilter) } ?: emptyList() }
+                async { withTimeoutOrNull(2600) { searchWikipedia(query, Category.COMIC) } ?: emptyList() }
             )
             BookSubFilter.MANGA -> listOf(
                 async { withTimeoutOrNull(2600) { searchMangaDex(query, langFilter) } ?: emptyList() },
@@ -1379,9 +1711,10 @@ class SearchRepository {
                 async { withTimeoutOrNull(2600) { searchGoogleBooks("$query manga", langFilter, bookSearchType) } ?: emptyList() }
             )
             BookSubFilter.ALL -> listOf(
-                async { withTimeoutOrNull(2600) { searchGoogleBooks(query, langFilter, bookSearchType) } ?: emptyList() },
-                async { withTimeoutOrNull(2600) { searchOpenLibrary(query, bookSearchType, langFilter) } ?: emptyList() },
                 async { withTimeoutOrNull(2600) { searchAppleBooks(query, langFilter) } ?: emptyList() },
+                async { withTimeoutOrNull(2600) { searchOpenLibrary(query, bookSearchType, langFilter) } ?: emptyList() },
+                async { withTimeoutOrNull(2600) { searchGoogleBooks(query, langFilter, bookSearchType) } ?: emptyList() },
+                async { withTimeoutOrNull(2600) { searchComicDb(query) } ?: emptyList() },
                 async { withTimeoutOrNull(2600) { searchGetComics(query) } ?: emptyList() },
                 async { withTimeoutOrNull(2600) { searchAniListManga(query) } ?: emptyList() },
                 async { withTimeoutOrNull(2600) { searchMangaDex(query, langFilter) } ?: emptyList() }
@@ -1397,6 +1730,106 @@ class SearchRepository {
         } else {
             deduped
         }
+    }
+
+    private fun searchComicDb(query: String): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        try {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            val url = "https://cataloggd.com/api/comicdb/series?q=$encoded"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0")
+                .build()
+            client.newCall(req).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val root = JSONObject(body)
+                    val arr = root.optJSONArray("series") ?: root.optJSONArray("results") ?: JSONArray()
+                    for (i in 0 until arr.length()) {
+                        val item = arr.getJSONObject(i)
+                        val name = item.optString("name").ifEmpty { item.optString("title") }
+                        val year = item.optString("year_began").ifEmpty { item.optString("year") }
+                        val publisher = item.optString("publisher")
+                        val issueCount = item.optInt("issue_count", 0)
+                        val cover = item.optString("cover_url")
+                        val id = item.optString("id")
+                        if (name.isNotBlank()) {
+                            results.add(
+                                SearchResult(
+                                    title = name,
+                                    creator = publisher,
+                                    releaseYear = year,
+                                    releaseDate = year,
+                                    coverUrl = cover,
+                                    overview = if (issueCount > 0) "$issueCount issues by $publisher" else publisher,
+                                    category = Category.COMIC,
+                                    externalUrl = if (id.isNotBlank()) "https://www.comics.org/series/$id" else ""
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return results
+    }
+
+    private fun searchHardcover(query: String): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        try {
+            val qEscaped = query.trim().replace("\"", "\\\"")
+            val queryStr = """
+                query SearchBooks {
+                  books(where: {title: {_ilike: "%$qEscaped%"}}, limit: 10) {
+                    id
+                    title
+                    release_year
+                    cached_image
+                    description
+                  }
+                }
+            """.trimIndent()
+            val reqJson = JSONObject().apply {
+                put("query", queryStr)
+            }
+            val reqBody = reqJson.toString().toRequestBody("application/json".toMediaType())
+            val req = Request.Builder()
+                .url("https://api.hardcover.app/v1/graphql")
+                .header("User-Agent", "ListsApp/1.0")
+                .post(reqBody)
+                .build()
+            client.newCall(req).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val root = JSONObject(body)
+                    val data = root.optJSONObject("data")
+                    val books = data?.optJSONArray("books") ?: JSONArray()
+                    for (i in 0 until books.length()) {
+                        val b = books.getJSONObject(i)
+                        val title = b.optString("title")
+                        val year = b.optString("release_year")
+                        val img = b.optJSONObject("cached_image")?.optString("url") ?: ""
+                        val desc = b.optString("description")
+                        val id = b.optString("id")
+                        if (title.isNotBlank()) {
+                            results.add(
+                                SearchResult(
+                                    title = title,
+                                    releaseYear = year,
+                                    releaseDate = year,
+                                    coverUrl = img,
+                                    overview = cleanHtml(desc),
+                                    category = Category.BOOK,
+                                    externalUrl = if (id.isNotBlank()) "https://hardcover.app/books/$id" else ""
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return results
     }
 
     private fun searchGetComics(query: String): List<SearchResult> {
@@ -1484,8 +1917,8 @@ class SearchRepository {
                         if (title.isBlank()) continue
                         val author = item.optString("artistName")
                         val artwork = item.optString("artworkUrl100")
-                            .replace("100x100bb.jpg", "800x800bb.jpg")
-                            .replace("100x100bb.png", "800x800bb.png")
+                            .replace("100x100bb.jpg", "1200x1200bb.jpg")
+                            .replace("100x100bb.png", "1200x1200bb.png")
                         val releaseDate = item.optString("releaseDate", "")
                         val year = if (releaseDate.length >= 4) releaseDate.take(4) else ""
                         val overview = cleanHtml(item.optString("description"))
@@ -1715,7 +2148,7 @@ class SearchRepository {
                         val author = if (authorArr != null && authorArr.length() > 0) authorArr.getString(0) else ""
                         val year = doc.optString("first_publish_year")
                         val coverId = doc.optInt("cover_i", 0)
-                        val cover = if (coverId > 0) "https://covers.openlibrary.org/b/id/$coverId-M.jpg" else ""
+                        val cover = if (coverId > 0) "https://covers.openlibrary.org/b/id/$coverId-L.jpg" else ""
                         val pages = doc.optInt("number_of_pages_median", 0).takeIf { it > 0 }
                             ?: doc.optInt("number_of_pages", 0).takeIf { it > 0 }
                             ?: doc.optJSONArray("number_of_pages")?.optInt(0, 0)
@@ -1853,10 +2286,56 @@ class SearchRepository {
     }
 
     // -------------------------------------------------------------
-    // GAMES: RecipeKit IMDb GraphQL Engine with clean covers & details (35 items)
+    // GAMES: IMDb Suggestions & GraphQL Engine with clean covers & details
     // -------------------------------------------------------------
     private fun searchImdbVideoGames(query: String, langFilter: String? = null): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
+        // 1. Instant Suggestion API for video games
+        try {
+            val qSanitized = query.trim().lowercase().replace(Regex("[^a-z0-9]+"), "_")
+            if (qSanitized.isNotBlank()) {
+                val url = "https://v3.sg.media-imdb.com/suggestion/x/$qSanitized.json"
+                val req = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0")
+                    .build()
+                client.newCall(req).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val body = response.body?.string() ?: ""
+                        val root = JSONObject(body)
+                        val arr = root.optJSONArray("d") ?: JSONArray()
+                        for (i in 0 until arr.length()) {
+                            val item = arr.getJSONObject(i)
+                            val qType = item.optString("q").lowercase()
+                            if (qType == "video game" || qType == "game") {
+                                val id = item.optString("id")
+                                val title = item.optString("l")
+                                val year = item.optString("y")
+                                val stars = item.optString("s")
+                                val imgObj = item.optJSONObject("i")
+                                var cover = imgObj?.optString("imageUrl") ?: ""
+                                if (cover.isNotBlank()) {
+                                    cover = cover.replace(Regex("""\._V1_.*\.jpg"""), "._V1_SX1200.jpg")
+                                }
+                                results.add(
+                                    SearchResult(
+                                        title = title,
+                                        creator = stars,
+                                        releaseYear = year,
+                                        releaseDate = year,
+                                        coverUrl = cover,
+                                        category = Category.GAME,
+                                        externalUrl = if (id.isNotBlank()) "https://www.imdb.com/title/$id" else ""
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 2. RecipeKit IMDb GraphQL Engine
         try {
             val acceptLang = when (langFilter?.lowercase()) {
                 "ja" -> "ja-JP,ja;q=0.9,en;q=0.8"
@@ -1959,6 +2438,104 @@ class SearchRepository {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+        return results
+    }
+
+    // -------------------------------------------------------------
+    // BOARD GAMES: Wikipedia + Wikidata + BGG
+    // -------------------------------------------------------------
+    private suspend fun searchBoardGames(
+        query: String,
+        yearFilter: String? = null,
+        langFilter: String? = null
+    ): List<SearchResult> = coroutineScope {
+        val wikiDeferred = async {
+            withTimeoutOrNull(2500) { searchWikipedia(query, Category.BOARD_GAME) } ?: emptyList()
+        }
+        val wikidataDeferred = async {
+            withTimeoutOrNull(2500) { searchWikidataBoardGames(query) } ?: emptyList()
+        }
+        val bggDeferred = async {
+            withTimeoutOrNull(2000) { searchBgg(query) } ?: emptyList()
+        }
+
+        val all = wikiDeferred.await() + wikidataDeferred.await() + bggDeferred.await()
+        all.map { it.copy(category = Category.BOARD_GAME) }
+    }
+
+    private fun searchWikidataBoardGames(query: String): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        try {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            val url = "https://www.wikidata.org/w/api.php?action=wbsearchentities&search=$encoded&language=en&type=item&limit=15&format=json"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "ListsApp/1.0 (contact@listsapp.com)")
+                .build()
+            client.newCall(req).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val root = JSONObject(body)
+                    val searchArr = root.optJSONArray("search") ?: JSONArray()
+                    for (i in 0 until searchArr.length()) {
+                        val item = searchArr.getJSONObject(i)
+                        val label = item.optString("label")
+                        val desc = item.optString("description")
+                        val lowerDesc = desc.lowercase()
+                        if (lowerDesc.contains("board game") || lowerDesc.contains("tabletop") ||
+                            lowerDesc.contains("card game") || lowerDesc.contains("roll-and-move") ||
+                            lowerDesc.contains("family game")) {
+                            val yearMatch = Regex("""\b(19\d{2}|20\d{2})\b""").find(desc)?.value ?: ""
+                            val conceptUri = item.optString("concepturi")
+                            results.add(
+                                SearchResult(
+                                    title = label,
+                                    releaseYear = yearMatch,
+                                    releaseDate = yearMatch,
+                                    overview = desc,
+                                    category = Category.BOARD_GAME,
+                                    externalUrl = conceptUri
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return results
+    }
+
+    private fun searchBgg(query: String): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        try {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            val url = "https://boardgamegeek.com/xmlapi2/search?query=$encoded&type=boardgame"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")
+                .build()
+            client.newCall(req).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val itemRegex = Regex("""<item type="boardgame" id="(\d+)">[\s\S]*?<name [^>]*value="([^"]+)"[\s\S]*?(?:<yearpublished value="(\d+)")?""")
+                    val matches = itemRegex.findAll(body)
+                    for (m in matches) {
+                        val id = m.groupValues[1]
+                        val name = m.groupValues[2]
+                        val year = if (m.groupValues.size > 3) m.groupValues[3] else ""
+                        results.add(
+                            SearchResult(
+                                title = name,
+                                releaseYear = year,
+                                releaseDate = year,
+                                category = Category.BOARD_GAME,
+                                externalUrl = "https://boardgamegeek.com/boardgame/$id"
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (_: Exception) {}
         return results
     }
 

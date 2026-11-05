@@ -113,7 +113,8 @@ enum class Category(
             BOOK,
             MANGA,
             COMIC,
-            GAME
+            GAME,
+            BOARD_GAME
         )
 
         fun fromId(id: String?): Category {
