@@ -19,3 +19,4 @@ git push -f origin gh-pages
 
 echo "✅ Successfully deployed to gh-pages branch!"
 echo "🌐 Your site is live at: https://rithvikv05.github.io/lists/"
+
