@@ -49,6 +49,7 @@ import com.lists.app.data.model.RatingScaleOption
 import com.lists.app.data.repository.AppRepository
 import com.lists.app.data.store.WebStore
 import com.lists.app.data.sync.DriveSyncManager
+import com.lists.app.data.sync.GoogleDriveSync
 import com.lists.app.data.sync.GoogleSignInAccount
 import com.lists.app.data.sync.GoogleSignInHelper
 import com.lists.app.getFileReaderResult
@@ -133,6 +134,12 @@ fun SettingsScreen(
     var autoSyncEnabled by remember { mutableStateOf(syncManager.autoSyncEnabled) }
     var isSyncing by remember { mutableStateOf(false) }
     var snapshots by remember { mutableStateOf(WebStore.getAvailableBackups()) }
+
+    LaunchedEffect(signedInAccount) {
+        val local = WebStore.getAvailableBackups()
+        val drive = if (signedInAccount != null) GoogleDriveSync.listDriveRollingBackups() else emptyList<WebStore.BackupInfo>()
+        snapshots = local + drive
+    }
 
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     val isWideLayout = screenWidthDp >= 600
@@ -723,14 +730,14 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            // Local Snapshots / Rolling Backup
+                            // Local & Drive Rolling Backups
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "Local Snapshots",
+                                    text = "Rolling Backups",
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurface
@@ -739,8 +746,12 @@ fun SettingsScreen(
                                     onClick = {
                                         triggerStrongTick(context)
                                         WebStore.saveAutoBackup()
-                                        snapshots = WebStore.getAvailableBackups()
-                                        Toast.makeText(context, "Snapshot saved", Toast.LENGTH_SHORT).show()
+                                        coroutineScope.launch {
+                                            val local = WebStore.getAvailableBackups()
+                                            val drive = if (signedInAccount != null) GoogleDriveSync.listDriveRollingBackups() else emptyList<WebStore.BackupInfo>()
+                                            snapshots = local + drive
+                                        }
+                                        Toast.makeText(context, "Local snapshot saved", Toast.LENGTH_SHORT).show()
                                     },
                                     shape = RoundedCornerShape(8.dp),
                                     color = MaterialTheme.colorScheme.primaryContainer,
@@ -763,13 +774,13 @@ fun SettingsScreen(
 
                             if (snapshots.isEmpty()) {
                                 Text(
-                                    text = "No local backups yet. Snapshots are automatically captured before syncs or changes.",
+                                    text = "1 rolling backup is stored locally and 2 rolling backups are secured on Google Drive.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             } else {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    snapshots.take(5).forEach { snap ->
+                                    snapshots.forEach { snap ->
                                         Surface(
                                             shape = RoundedCornerShape(10.dp),
                                             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -801,9 +812,17 @@ fun SettingsScreen(
                                                 OutlinedButton(
                                                     onClick = {
                                                         triggerStrongTick(context)
-                                                        val success = WebStore.restoreFromBackup(snap.key)
-                                                        if (success) {
-                                                            Toast.makeText(context, "Restored snapshot", Toast.LENGTH_SHORT).show()
+                                                        coroutineScope.launch {
+                                                            val success = if (snap.isDrive && snap.driveFileId != null) {
+                                                                GoogleDriveSync.restoreDriveRollingBackup(snap.driveFileId)
+                                                            } else {
+                                                                WebStore.restoreFromBackup(snap.key)
+                                                            }
+                                                            if (success) {
+                                                                Toast.makeText(context, "Restored snapshot", Toast.LENGTH_SHORT).show()
+                                                            } else {
+                                                                Toast.makeText(context, "Restore failed", Toast.LENGTH_SHORT).show()
+                                                            }
                                                         }
                                                     },
                                                     shape = RoundedCornerShape(8.dp),
@@ -815,6 +834,75 @@ fun SettingsScreen(
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // SECTION 3: NOTIFICATIONS & REMINDERS
+                Text(
+                    text = "NOTIFICATIONS & REMINDERS",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    text = "Fallback Reminder Time",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Alert time when exact episode airtime is unavailable",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            var fallbackHour by remember {
+                                mutableStateOf(kotlinx.browser.localStorage.getItem("fallback_reminder_hour")?.toIntOrNull() ?: 9)
+                            }
+                            val ampm = if (fallbackHour < 12) "AM" else "PM"
+                            val displayHour = if (fallbackHour == 0) 12 else if (fallbackHour > 12) fallbackHour - 12 else fallbackHour
+                            val formattedTime = "${if (displayHour < 10) "0" else ""}$displayHour:00 $ampm"
+
+                            Surface(
+                                onClick = {
+                                    triggerAsmrTick(context)
+                                    val nextHour = (fallbackHour + 1) % 24
+                                    fallbackHour = nextHour
+                                    kotlinx.browser.localStorage.setItem("fallback_reminder_hour", nextHour.toString())
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
+                                    Text(
+                                        text = formattedTime,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
                                 }
                             }
                         }

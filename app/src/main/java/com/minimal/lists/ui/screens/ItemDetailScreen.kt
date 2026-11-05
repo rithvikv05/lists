@@ -30,6 +30,8 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.SportsEsports
@@ -66,6 +68,7 @@ import com.minimal.lists.data.api.SearchRepository
 import com.minimal.lists.data.db.ListItem
 import com.minimal.lists.data.model.Category
 import com.minimal.lists.data.model.RatingConverter
+import com.minimal.lists.data.reminder.EpisodeReminderManager
 import com.minimal.lists.data.repository.AppRepository
 import com.minimal.lists.ui.components.CoverImage
 import com.minimal.lists.ui.components.triggerAsmrTick
@@ -1424,7 +1427,8 @@ fun SeasonEpisodeTracker(
                             season = obj.optInt("season", 1),
                             number = obj.optInt("number", i + 1),
                             name = obj.optString("name", "Episode ${i + 1}"),
-                            airdate = obj.optString("airdate", "")
+                            airdate = obj.optString("airdate", ""),
+                            airstamp = obj.optString("airstamp", "")
                         )
                     )
                 }
@@ -1443,6 +1447,7 @@ fun SeasonEpisodeTracker(
                     obj.put("number", ep.number)
                     obj.put("name", ep.name)
                     obj.put("airdate", ep.airdate)
+                    obj.put("airstamp", ep.airstamp)
                     arr.put(obj)
                 }
                 repository.saveCachedEpisodes(item, arr.toString())
@@ -1626,12 +1631,37 @@ fun SeasonEpisodeTracker(
                             }
 
                             if (isLocked) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = "Locked",
-                                    tint = MaterialTheme.colorScheme.outline,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    var isReminderActive by remember(item.id, ep.key) {
+                                        mutableStateOf(EpisodeReminderManager.isReminderSet(context, item.id, ep.key))
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            triggerAsmrTick(context)
+                                            val newStatus = EpisodeReminderManager.toggleReminder(context, item, ep)
+                                            isReminderActive = newStatus
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isReminderActive) Icons.Default.Notifications else Icons.Default.NotificationsNone,
+                                            contentDescription = if (isReminderActive) "Reminder enabled" else "Enable reminder",
+                                            tint = if (isReminderActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+
+                                    Icon(
+                                        imageVector = Icons.Default.Lock,
+                                        contentDescription = "Locked",
+                                        tint = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             } else {
                                 Box(
                                     modifier = Modifier

@@ -24,7 +24,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
@@ -148,6 +149,8 @@ fun ListsScreen(
     var listForOptionsSheet by remember { mutableStateOf<UserList?>(null) }
     var listToEdit by remember { mutableStateOf<UserList?>(null) }
     var listToDelete by remember { mutableStateOf<UserList?>(null) }
+    var selectedListIds by remember { mutableStateOf(emptySet<Long>()) }
+    var showBulkDeleteDialog by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
@@ -283,100 +286,171 @@ fun ListsScreen(
                         .fillMaxSize()
                         .padding(horizontal = if (isWideLayout) 24.dp else 16.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(top = 16.dp, bottom = 8.dp)
-                            .height(44.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Lists",
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            letterSpacing = (-0.5).sp
-                        )
+                    if (selectedListIds.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(top = 16.dp, bottom = 8.dp)
+                                .height(44.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = {
+                                    triggerStrongTick(context)
+                                    selectedListIds = emptySet()
+                                }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurface)
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "${selectedListIds.size} selected",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
 
-                        if (!isWideLayout) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                IconButton(
-                                    onClick = {
-                                        val account = signInHelper.getSignedInAccount()
-                                        if (account != null) {
-                                            scope.launch {
-                                                triggerAsmrTick(context)
-                                                syncManager.syncNow(account, repository)
-                                            }
-                                        } else {
-                                            onNavigateToSettings?.invoke()
-                                        }
-                                    },
-                                    modifier = Modifier.size(40.dp)
+                                IconButton(onClick = {
+                                    triggerAsmrTick(context)
+                                    selectedListIds = if (selectedListIds.size == displayedLists.size) emptySet() else displayedLists.map { it.list.id }.toSet()
+                                }) {
+                                    Icon(Icons.Default.SelectAll, contentDescription = "Select All", tint = MaterialTheme.colorScheme.onSurface)
+                                }
+
+                                IconButton(onClick = {
+                                    triggerStrongTick(context)
+                                    val selectedLists = displayedLists.filter { selectedListIds.contains(it.list.id) }.map { it.list }
+                                    val anyUnpinned = selectedLists.any { !it.pinned }
+                                    scope.launch {
+                                        repository.setListsPinned(selectedLists, anyUnpinned)
+                                        selectedListIds = emptySet()
+                                    }
+                                }) {
+                                    Icon(Icons.Default.PushPin, contentDescription = "Pin/Unpin", tint = MaterialTheme.colorScheme.primary)
+                                }
+
+                                IconButton(onClick = {
+                                    triggerStrongTick(context)
+                                    val selectedLists = displayedLists.filter { selectedListIds.contains(it.list.id) }.map { it.list }
+                                    val anyUnarchived = selectedLists.any { !it.isArchived }
+                                    scope.launch {
+                                        repository.setListsArchived(selectedLists, anyUnarchived)
+                                        selectedListIds = emptySet()
+                                    }
+                                }) {
+                                    Icon(Icons.Default.Archive, contentDescription = "Archive", tint = MaterialTheme.colorScheme.primary)
+                                }
+
+                                IconButton(onClick = {
+                                    triggerStrongTick(context)
+                                    showBulkDeleteDialog = true
+                                }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(top = 16.dp, bottom = 8.dp)
+                                .height(44.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Lists",
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                letterSpacing = (-0.5).sp
+                            )
+
+                            if (!isWideLayout) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        if (syncStatus is DriveSyncManager.SyncStatus.Syncing) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(16.dp),
-                                                strokeWidth = 2.dp,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        } else {
-                                            Icon(
-                                                imageVector = Icons.Default.Cloud,
-                                                contentDescription = "Sync",
-                                                tint = if (signedInAccount != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant,
-                                                modifier = Modifier.size(22.dp)
-                                            )
-                                            if (signedInAccount != null && syncManager.lastSyncTimestamp > 0) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .align(Alignment.TopEnd)
-                                                        .size(6.dp)
-                                                        .clip(CircleShape)
-                                                        .background(Color(0xFF00E676))
+                                    IconButton(
+                                        onClick = {
+                                            val account = signInHelper.getSignedInAccount()
+                                            if (account != null) {
+                                                scope.launch {
+                                                    triggerAsmrTick(context)
+                                                    syncManager.syncNow(account, repository)
+                                                }
+                                            } else {
+                                                onNavigateToSettings?.invoke()
+                                            }
+                                        },
+                                        modifier = Modifier.size(40.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            if (syncStatus is DriveSyncManager.SyncStatus.Syncing) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(16.dp),
+                                                    strokeWidth = 2.dp,
+                                                    color = MaterialTheme.colorScheme.primary
                                                 )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Default.Cloud,
+                                                    contentDescription = "Sync",
+                                                    tint = if (signedInAccount != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant,
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                                if (signedInAccount != null && syncManager.lastSyncTimestamp > 0) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.TopEnd)
+                                                            .size(6.dp)
+                                                            .clip(CircleShape)
+                                                            .background(Color(0xFF00E676))
+                                                    )
+                                                }
                                             }
                                         }
                                     }
-                                }
 
-                                IconButton(
-                                    onClick = {
-                                        triggerAsmrTick(context)
-                                        showSearchBar = !showSearchBar
-                                        if (!showSearchBar) {
-                                            focusManager.clearFocus()
-                                            searchQuery = ""
-                                        }
-                                    },
-                                    modifier = Modifier.size(40.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Search,
-                                        contentDescription = "Search",
-                                        tint = if (showSearchBar || searchQuery.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-
-                                if (onNavigateToSettings != null) {
                                     IconButton(
-                                        onClick = onNavigateToSettings,
+                                        onClick = {
+                                            triggerAsmrTick(context)
+                                            showSearchBar = !showSearchBar
+                                            if (!showSearchBar) {
+                                                focusManager.clearFocus()
+                                                searchQuery = ""
+                                            }
+                                        },
                                         modifier = Modifier.size(40.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Settings,
-                                            contentDescription = "Settings",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = "Search",
+                                            tint = if (showSearchBar || searchQuery.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(22.dp)
                                         )
+                                    }
+
+                                    if (onNavigateToSettings != null) {
+                                        IconButton(
+                                            onClick = onNavigateToSettings,
+                                            modifier = Modifier.size(40.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Settings,
+                                                contentDescription = "Settings",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -492,16 +566,27 @@ fun ListsScreen(
                         ) {
                             items(displayedLists, key = { it.list.id }) { listWithStats ->
                                 val cat = Category.fromId(listWithStats.list.category)
+                                val isSelected = selectedListIds.contains(listWithStats.list.id)
+                                val inSelectionMode = selectedListIds.isNotEmpty()
                                 DiscreteListCard(
                                     title = listWithStats.list.name,
                                     category = cat,
                                     itemCount = listWithStats.itemCount,
                                     completedCount = listWithStats.completedCount,
                                     isPinned = listWithStats.list.pinned,
-                                    onClick = { openList(listWithStats.list.id) },
+                                    selected = isSelected,
+                                    selectionMode = inSelectionMode,
+                                    onClick = {
+                                        if (inSelectionMode) {
+                                            triggerAsmrTick(context)
+                                            selectedListIds = if (isSelected) selectedListIds - listWithStats.list.id else selectedListIds + listWithStats.list.id
+                                        } else {
+                                            openList(listWithStats.list.id)
+                                        }
+                                    },
                                     onLongClick = {
                                         triggerStrongTick(context)
-                                        listForOptionsSheet = listWithStats.list
+                                        selectedListIds = if (isSelected) selectedListIds - listWithStats.list.id else selectedListIds + listWithStats.list.id
                                     }
                                 )
                             }
@@ -517,16 +602,27 @@ fun ListsScreen(
                         ) {
                             items(displayedLists, key = { it.list.id }) { listWithStats ->
                                 val cat = Category.fromId(listWithStats.list.category)
+                                val isSelected = selectedListIds.contains(listWithStats.list.id)
+                                val inSelectionMode = selectedListIds.isNotEmpty()
                                 BentoCollectionCard(
                                     title = listWithStats.list.name,
                                     category = cat,
                                     itemCount = listWithStats.itemCount,
                                     completedCount = listWithStats.completedCount,
                                     isPinned = listWithStats.list.pinned,
-                                    onClick = { openList(listWithStats.list.id) },
+                                    selected = isSelected,
+                                    selectionMode = inSelectionMode,
+                                    onClick = {
+                                        if (inSelectionMode) {
+                                            triggerAsmrTick(context)
+                                            selectedListIds = if (isSelected) selectedListIds - listWithStats.list.id else selectedListIds + listWithStats.list.id
+                                        } else {
+                                            openList(listWithStats.list.id)
+                                        }
+                                    },
                                     onLongClick = {
                                         triggerStrongTick(context)
-                                        listForOptionsSheet = listWithStats.list
+                                        selectedListIds = if (isSelected) selectedListIds - listWithStats.list.id else selectedListIds + listWithStats.list.id
                                     }
                                 )
                             }
@@ -938,6 +1034,52 @@ fun ListsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { listToDelete = null }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Bulk Delete Lists Confirmation Modal
+    if (showBulkDeleteDialog) {
+        val count = selectedListIds.size
+        AlertDialog(
+            onDismissRequest = { showBulkDeleteDialog = false },
+            title = {
+                Text("Delete $count lists?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    "Are you sure you want to delete these $count lists and all of their items? This action cannot be undone.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val idsToDelete = selectedListIds
+                        showBulkDeleteDialog = false
+                        selectedListIds = emptySet()
+                        triggerStrongTick(context)
+                        scope.launch {
+                            val targets = displayedLists.filter { idsToDelete.contains(it.list.id) }.map { it.list }
+                            repository.deleteLists(targets)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBulkDeleteDialog = false }) {
                     Text("Cancel")
                 }
             },

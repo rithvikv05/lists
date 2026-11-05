@@ -50,7 +50,8 @@ data class EpisodeItem(
     val season: Int,
     val number: Int,
     val name: String,
-    val airdate: String = ""
+    val airdate: String = "",
+    val airstamp: String = ""
 ) {
     val key: String get() = "S${season}E${number}"
 }
@@ -485,7 +486,8 @@ class SearchRepository {
                         val number = ep.optInt("number", i + 1)
                         val name = ep.optString("name", "Episode $number")
                         val airdate = ep.optString("airdate", "")
-                        results.add(EpisodeItem(season, number, name, airdate))
+                        val airstamp = ep.optString("airstamp", "")
+                        results.add(EpisodeItem(season, number, name, airdate, airstamp))
                     }
                 }
             }

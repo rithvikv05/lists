@@ -149,6 +149,16 @@ object WebStore {
         saveToStorage()
     }
 
+    fun updateLists(updated: List<UserList>) {
+        val now = currentTimeMillis()
+        val map = updated.associateBy { it.id }
+        _lists.value = _lists.value.map {
+            val u = map[it.id]
+            if (u != null) u.copy(updatedAt = now) else it
+        }
+        saveToStorage()
+    }
+
     fun deleteList(list: UserList) {
         val now = currentTimeMillis()
         _lists.value = _lists.value.filterNot { it.id == list.id || it.uuid == list.uuid }
@@ -165,6 +175,29 @@ object WebStore {
             localStorage.removeItem("view_mode_${list.id}")
             localStorage.removeItem("lists_view_prefs_view_mode_${list.id}")
         } catch (_: Exception) {}
+        saveToStorage()
+    }
+
+    fun deleteLists(lists: List<UserList>) {
+        val now = currentTimeMillis()
+        val ids = lists.map { it.id }.toSet()
+        val uuids = lists.map { it.uuid }.filter { it.isNotBlank() }.toSet()
+        _lists.value = _lists.value.filterNot { ids.contains(it.id) || uuids.contains(it.uuid) }
+        val deletedItems = _items.value.filter { ids.contains(it.listId) || uuids.contains(it.listUuid) }
+        _items.value = _items.value.filterNot { ids.contains(it.listId) || uuids.contains(it.listUuid) }
+
+        val newTombstones = _tombstones.value.toMutableList()
+        lists.forEach { list ->
+            newTombstones.add(Tombstone(entityUuid = list.uuid, entityType = "LIST", deletedAt = now))
+            try {
+                localStorage.removeItem("view_mode_${list.id}")
+                localStorage.removeItem("lists_view_prefs_view_mode_${list.id}")
+            } catch (_: Exception) {}
+        }
+        deletedItems.forEach { item ->
+            newTombstones.add(Tombstone(entityUuid = item.uuid, entityType = "ITEM", deletedAt = now))
+        }
+        _tombstones.value = newTombstones
         saveToStorage()
     }
 
@@ -197,11 +230,34 @@ object WebStore {
         saveToStorage()
     }
 
+    fun updateItems(updated: List<ListItem>) {
+        val now = currentTimeMillis()
+        val map = updated.associateBy { it.id }
+        _items.value = _items.value.map {
+            val u = map[it.id]
+            if (u != null) u.copy(updatedAt = now) else it
+        }
+        saveToStorage()
+    }
+
     fun deleteItem(item: ListItem) {
         val now = currentTimeMillis()
         _items.value = _items.value.filterNot { it.id == item.id || it.uuid == item.uuid }
         val newTombstones = _tombstones.value.toMutableList()
         newTombstones.add(Tombstone(entityUuid = item.uuid, entityType = "ITEM", deletedAt = now))
+        _tombstones.value = newTombstones
+        saveToStorage()
+    }
+
+    fun deleteItems(items: List<ListItem>) {
+        val now = currentTimeMillis()
+        val ids = items.map { it.id }.toSet()
+        val uuids = items.map { it.uuid }.filter { it.isNotBlank() }.toSet()
+        _items.value = _items.value.filterNot { ids.contains(it.id) || uuids.contains(it.uuid) }
+        val newTombstones = _tombstones.value.toMutableList()
+        items.forEach { item ->
+            newTombstones.add(Tombstone(entityUuid = item.uuid, entityType = "ITEM", deletedAt = now))
+        }
         _tombstones.value = newTombstones
         saveToStorage()
     }
@@ -260,29 +316,23 @@ object WebStore {
 
     // ==================== BACKUP SAFETY NET ====================
 
-    private const val MAX_AUTO_BACKUPS = 3
-    private const val BACKUP_INDEX_KEY = "lists_backup_index"
+    private const val LOCAL_BACKUP_KEY = "lists_local_backup_latest"
     private const val PRESYNC_BACKUP_KEY = "lists_presync_backup"
 
     /**
-     * Save an automatic backup snapshot with a timestamp.
-     * Keeps a rolling window of MAX_AUTO_BACKUPS.
+     * Save 1 local rolling snapshot with timestamp.
      */
     fun saveAutoBackup() {
         try {
             val backup = createBackup()
-            // Don't save empty backups
             if (backup.lists.isEmpty() && backup.items.isEmpty()) return
 
             val now = currentTimeMillis()
             val backupJson = json.encodeToString(backup)
-            val slotIndex = getNextBackupSlot()
-            val key = "lists_auto_backup_$slotIndex"
-            localStorage[key] = backupJson
-            localStorage["${key}_timestamp"] = now.toString()
-            localStorage["${key}_count"] = "${backup.lists.size}L/${backup.items.size}I"
-            localStorage[BACKUP_INDEX_KEY] = ((slotIndex + 1) % MAX_AUTO_BACKUPS).toString()
-            println("Auto-backup saved to slot $slotIndex (${backup.lists.size} lists, ${backup.items.size} items)")
+            localStorage[LOCAL_BACKUP_KEY] = backupJson
+            localStorage["${LOCAL_BACKUP_KEY}_timestamp"] = now.toString()
+            localStorage["${LOCAL_BACKUP_KEY}_count"] = "${backup.lists.size} lists · ${backup.items.size} items"
+            println("Local rolling backup saved (1 local backup: ${backup.lists.size} lists, ${backup.items.size} items)")
         } catch (e: Exception) {
             println("Auto-backup failed: ${e.message}")
         }
@@ -290,7 +340,6 @@ object WebStore {
 
     /**
      * Save a pre-sync snapshot — called right before mergeFromRemote.
-     * This is the most important safety net.
      */
     fun savePreSyncBackup() {
         try {
@@ -300,15 +349,11 @@ object WebStore {
             val backupJson = json.encodeToString(backup)
             localStorage[PRESYNC_BACKUP_KEY] = backupJson
             localStorage["${PRESYNC_BACKUP_KEY}_timestamp"] = currentTimeMillis().toString()
-            localStorage["${PRESYNC_BACKUP_KEY}_count"] = "${backup.lists.size}L/${backup.items.size}I"
+            localStorage["${PRESYNC_BACKUP_KEY}_count"] = "${backup.lists.size} lists · ${backup.items.size} items"
             println("Pre-sync backup saved (${backup.lists.size} lists, ${backup.items.size} items)")
         } catch (e: Exception) {
             println("Pre-sync backup failed: ${e.message}")
         }
-    }
-
-    private fun getNextBackupSlot(): Int {
-        return localStorage[BACKUP_INDEX_KEY]?.toIntOrNull() ?: 0
     }
 
     /**
@@ -318,42 +363,41 @@ object WebStore {
         val key: String,
         val label: String,
         val timestamp: Long,
-        val summary: String
+        val summary: String,
+        val isDrive: Boolean = false,
+        val driveFileId: String? = null
     )
 
     /**
-     * Get list of available backups for recovery.
+     * Get list of available backups for recovery (1 local snapshot + pre-sync if present).
      */
     fun getAvailableBackups(): List<BackupInfo> {
         val backups = mutableListOf<BackupInfo>()
 
-        // Pre-sync backup
+        // 1 Local Rolling Backup
+        val localJson = localStorage[LOCAL_BACKUP_KEY]
+        if (!localJson.isNullOrEmpty()) {
+            val ts = localStorage["${LOCAL_BACKUP_KEY}_timestamp"]?.toLongOrNull() ?: 0L
+            val count = localStorage["${LOCAL_BACKUP_KEY}_count"] ?: "?"
+            backups.add(BackupInfo(
+                key = LOCAL_BACKUP_KEY,
+                label = "Local Backup (1/1)",
+                timestamp = ts,
+                summary = count
+            ))
+        }
+
+        // Pre-sync safety snapshot
         val presyncJson = localStorage[PRESYNC_BACKUP_KEY]
         if (!presyncJson.isNullOrEmpty()) {
             val ts = localStorage["${PRESYNC_BACKUP_KEY}_timestamp"]?.toLongOrNull() ?: 0L
             val count = localStorage["${PRESYNC_BACKUP_KEY}_count"] ?: "?"
             backups.add(BackupInfo(
                 key = PRESYNC_BACKUP_KEY,
-                label = "Pre-sync backup",
+                label = "Pre-sync safety snapshot",
                 timestamp = ts,
                 summary = count
             ))
-        }
-
-        // Rolling auto-backups
-        for (i in 0 until MAX_AUTO_BACKUPS) {
-            val key = "lists_auto_backup_$i"
-            val backupJson = localStorage[key]
-            if (!backupJson.isNullOrEmpty()) {
-                val ts = localStorage["${key}_timestamp"]?.toLongOrNull() ?: 0L
-                val count = localStorage["${key}_count"] ?: "?"
-                backups.add(BackupInfo(
-                    key = key,
-                    label = "Auto-backup #${i + 1}",
-                    timestamp = ts,
-                    summary = count
-                ))
-            }
         }
 
         return backups.sortedByDescending { it.timestamp }

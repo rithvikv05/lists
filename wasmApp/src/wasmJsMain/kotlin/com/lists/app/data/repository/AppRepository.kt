@@ -21,8 +21,11 @@ class AppRepository(val context: Any? = null) {
 
     val allListsWithStats: Flow<List<ListWithStats>> = combine(WebStore.lists, WebStore.items) { lists, items ->
         lists.sortedBy { it.customOrderIndex }.map { list ->
-            val listItems = items.filter { it.listId == list.id || it.listUuid == list.uuid }
-            val completed = listItems.count { it.marked || it.status == ItemStatus.COMPLETED }
+            val listItems = items.filter {
+                (it.listId != 0L && it.listId == list.id) ||
+                (it.listUuid.isNotBlank() && it.listUuid == list.uuid)
+            }
+            val completed = listItems.count { it.marked }
             ListWithStats(
                 list = list,
                 itemCount = listItems.size,
@@ -39,7 +42,10 @@ class AppRepository(val context: Any? = null) {
     fun getItems(listId: Long): Flow<List<ListItem>> = combine(WebStore.lists, WebStore.items) { lists, items ->
         val parent = lists.firstOrNull { it.id == listId }
         val parentUuid = parent?.uuid ?: ""
-        items.filter { item -> item.listId == listId || (parentUuid.isNotEmpty() && item.listUuid == parentUuid) }
+        items.filter { item ->
+            (item.listId != 0L && item.listId == listId) ||
+            (parentUuid.isNotBlank() && item.listUuid.isNotBlank() && item.listUuid == parentUuid)
+        }
     }
 
     fun getItem(id: Long): Flow<ListItem?> = WebStore.items.map { it.firstOrNull { item -> item.id == id } }
@@ -49,7 +55,7 @@ class AppRepository(val context: Any? = null) {
         val parent = lists.firstOrNull { it.id == listId }
         val parentUuid = parent?.uuid ?: ""
         items.filter { item ->
-            (item.listId == listId || (parentUuid.isNotEmpty() && item.listUuid == parentUuid)) && item.coverUrl.isNotBlank()
+            ((item.listId != 0L && item.listId == listId) || (parentUuid.isNotBlank() && item.listUuid.isNotBlank() && item.listUuid == parentUuid)) && item.coverUrl.isNotBlank()
         }.map { it.coverUrl }.take(4)
     }
 
@@ -73,6 +79,48 @@ class AppRepository(val context: Any? = null) {
 
     suspend fun deleteList(list: UserList) {
         WebStore.deleteList(list)
+    }
+
+    suspend fun deleteLists(lists: List<UserList>) {
+        WebStore.deleteLists(lists)
+    }
+
+    suspend fun setListsPinned(lists: List<UserList>, pinned: Boolean) {
+        val updated = lists.map { it.copy(pinned = pinned) }
+        WebStore.updateLists(updated)
+    }
+
+    suspend fun setListsArchived(lists: List<UserList>, archived: Boolean) {
+        val updated = lists.map { it.copy(isArchived = archived) }
+        WebStore.updateLists(updated)
+    }
+
+    suspend fun deleteItems(items: List<ListItem>) {
+        WebStore.deleteItems(items)
+    }
+
+    suspend fun setItemsMarked(items: List<ListItem>, marked: Boolean) {
+        val status = if (marked) ItemStatus.COMPLETED else ItemStatus.BACKLOG
+        val now = currentTimeMillis()
+        val updated = items.map {
+            it.copy(
+                marked = marked,
+                status = status,
+                markedAt = if (marked) now else null
+            )
+        }
+        WebStore.updateItems(updated)
+    }
+
+    suspend fun setItemsPinned(items: List<ListItem>, pinned: Boolean) {
+        val now = currentTimeMillis()
+        val updated = items.map {
+            it.copy(
+                pinned = pinned,
+                pinnedAt = if (pinned) now else null
+            )
+        }
+        WebStore.updateItems(updated)
     }
 
     suspend fun addItemFromSearch(listId: Long, result: SearchResult): Long {
@@ -214,7 +262,23 @@ class AppRepository(val context: Any? = null) {
 
     suspend fun saveCachedEpisodes(item: ListItem, episodesJson: String, episodeCount: Int = 0) {
         val total = if (episodeCount > 0) episodeCount else item.totalEpisodes
-        WebStore.updateItem(item.copy(episodesDataJson = episodesJson, totalEpisodes = total, updatedAt = currentTimeMillis()))
+        val checkedKeys = parseCheckedKeys(item.checkedEpisodesJson)
+        val allCompleted = total > 0 && checkedKeys.size >= total
+        val newStatus = when {
+            allCompleted -> com.lists.app.data.model.ItemStatus.COMPLETED
+            checkedKeys.isNotEmpty() -> com.lists.app.data.model.ItemStatus.IN_PROGRESS
+            else -> com.lists.app.data.model.ItemStatus.BACKLOG
+        }
+        WebStore.updateItem(
+            item.copy(
+                episodesDataJson = episodesJson,
+                totalEpisodes = total,
+                marked = allCompleted,
+                status = newStatus,
+                markedAt = if (allCompleted) (item.markedAt ?: currentTimeMillis()) else null,
+                updatedAt = currentTimeMillis()
+            )
+        )
     }
 
     fun parseCheckedKeys(jsonStr: String): Set<String> {

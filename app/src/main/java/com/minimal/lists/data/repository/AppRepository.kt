@@ -103,6 +103,38 @@ class AppRepository(private val context: Context) {
         notifyDataChanged()
     }
 
+    suspend fun deleteLists(lists: List<UserList>) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        lists.forEach { list ->
+            val items = itemDao.getItemsForListSync(list.id)
+            items.forEach { item ->
+                storageManager.deleteCover(item.uuid, item.coverUrl)
+                tombstoneManager.recordDeletedItem(item.uuid, now)
+            }
+            tombstoneManager.recordDeletedList(list.uuid, now)
+            listDao.deleteList(list)
+            try {
+                context.getSharedPreferences("lists_view_prefs", Context.MODE_PRIVATE)
+                    .edit().remove("view_mode_${list.id}").apply()
+            } catch (_: Exception) {}
+        }
+        notifyDataChanged()
+    }
+
+    suspend fun setListsPinned(lists: List<UserList>, pinned: Boolean) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val updated = lists.map { it.copy(pinned = pinned, updatedAt = now) }
+        listDao.updateLists(updated)
+        notifyDataChanged()
+    }
+
+    suspend fun setListsArchived(lists: List<UserList>, archived: Boolean) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val updated = lists.map { it.copy(isArchived = archived, updatedAt = now) }
+        listDao.updateLists(updated)
+        notifyDataChanged()
+    }
+
     suspend fun updateItemReviewRating(item: ListItem, reviewRating: Int) = withContext(Dispatchers.IO) {
         itemDao.updateItem(item.copy(reviewRating = reviewRating, updatedAt = System.currentTimeMillis()))
         notifyDataChanged()
@@ -111,7 +143,23 @@ class AppRepository(private val context: Context) {
     suspend fun saveCachedEpisodes(item: ListItem, episodesJson: String) = withContext(Dispatchers.IO) {
         val totalEps = try { JSONArray(episodesJson).length() } catch (_: Exception) { item.totalEpisodes }
         val effectiveTotal = if (totalEps > 0) totalEps else item.totalEpisodes
-        itemDao.updateItem(item.copy(episodesDataJson = episodesJson, totalEpisodes = effectiveTotal, updatedAt = System.currentTimeMillis()))
+        val checkedKeys = parseCheckedKeys(item.checkedEpisodesJson)
+        val allCompleted = effectiveTotal > 0 && checkedKeys.size >= effectiveTotal
+        val newStatus = when {
+            allCompleted -> ItemStatus.COMPLETED
+            checkedKeys.isNotEmpty() -> ItemStatus.IN_PROGRESS
+            else -> ItemStatus.BACKLOG
+        }
+        itemDao.updateItem(
+            item.copy(
+                episodesDataJson = episodesJson,
+                totalEpisodes = effectiveTotal,
+                marked = allCompleted,
+                status = newStatus,
+                markedAt = if (allCompleted) (item.markedAt ?: System.currentTimeMillis()) else null,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
         notifyDataChanged()
     }
 
@@ -373,6 +421,44 @@ class AppRepository(private val context: Context) {
         storageManager.deleteCover(item.uuid, item.coverUrl)
         tombstoneManager.recordDeletedItem(item.uuid, System.currentTimeMillis())
         itemDao.deleteItem(item)
+        notifyDataChanged()
+    }
+
+    suspend fun deleteItems(items: List<ListItem>) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        items.forEach { item ->
+            storageManager.deleteCover(item.uuid, item.coverUrl)
+            tombstoneManager.recordDeletedItem(item.uuid, now)
+            itemDao.deleteItem(item)
+        }
+        notifyDataChanged()
+    }
+
+    suspend fun setItemsMarked(items: List<ListItem>, marked: Boolean) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        items.forEach { item ->
+            itemDao.updateItem(
+                item.copy(
+                    marked = marked,
+                    markedAt = if (marked) now else null,
+                    updatedAt = now
+                )
+            )
+        }
+        notifyDataChanged()
+    }
+
+    suspend fun setItemsPinned(items: List<ListItem>, pinned: Boolean) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        items.forEach { item ->
+            itemDao.updateItem(
+                item.copy(
+                    pinned = pinned,
+                    pinnedAt = if (pinned) now else null,
+                    updatedAt = now
+                )
+            )
+        }
         notifyDataChanged()
     }
 

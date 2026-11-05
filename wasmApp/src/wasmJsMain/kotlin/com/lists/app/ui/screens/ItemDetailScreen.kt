@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -1530,12 +1532,43 @@ fun SeasonEpisodeTracker(
                             }
 
                             if (isLocked) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = "Locked",
-                                    tint = MaterialTheme.colorScheme.outline,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    val prefsKey = "reminder_${item.id}_${ep.key}"
+                                    var isReminderActive by remember(item.id, ep.key) {
+                                        mutableStateOf(kotlinx.browser.localStorage.getItem(prefsKey) == "true")
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            triggerAsmrTick(context)
+                                            val next = !isReminderActive
+                                            isReminderActive = next
+                                            if (next) {
+                                                kotlinx.browser.localStorage.setItem(prefsKey, "true")
+                                            } else {
+                                                kotlinx.browser.localStorage.removeItem(prefsKey)
+                                            }
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isReminderActive) Icons.Default.Notifications else Icons.Default.NotificationsNone,
+                                            contentDescription = if (isReminderActive) "Reminder enabled" else "Enable reminder",
+                                            tint = if (isReminderActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+
+                                    Icon(
+                                        imageVector = Icons.Default.Lock,
+                                        contentDescription = "Locked",
+                                        tint = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             } else {
                                 Box(
                                     modifier = Modifier

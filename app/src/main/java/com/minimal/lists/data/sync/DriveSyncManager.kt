@@ -35,6 +35,14 @@ class DriveSyncManager(private val context: Context) {
         data class Error(val message: String) : SyncStatus()
     }
 
+    data class DriveBackupInfo(
+        val fileId: String,
+        val name: String,
+        val timestamp: Long,
+        val formattedDate: String,
+        val formattedSize: String
+    )
+
     companion object {
         private const val TAG = "DriveSyncManager"
         private const val SYNC_FILE_JSON = "lists_sync.json"
@@ -271,11 +279,96 @@ class DriveSyncManager(private val context: Context) {
         }
 
         when (result) {
-            is SyncResult.Success -> _syncStatus.value = SyncStatus.Success(lastSyncTimestamp)
+            is SyncResult.Success -> {
+                _syncStatus.value = SyncStatus.Success(lastSyncTimestamp)
+                uploadRollingBackupToDrive(account, repository)
+            }
             is SyncResult.Error -> _syncStatus.value = SyncStatus.Error(result.message)
             else -> _syncStatus.value = SyncStatus.Idle
         }
         result
+    }
+
+    /**
+     * Maintain strictly the last 2 rolling backups on Google Drive in appDataFolder.
+     */
+    suspend fun uploadRollingBackupToDrive(account: GoogleSignInAccount, repository: AppRepository): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val drive = getDriveService(account)
+            val jsonContent = repository.exportDataToJson()
+            val content = ByteArrayContent("application/json", jsonContent.toByteArray(Charsets.UTF_8))
+
+            val metadata = File().apply {
+                name = "lists_backup_${System.currentTimeMillis()}.json"
+                parents = Collections.singletonList("appDataFolder")
+            }
+
+            drive.files().create(metadata, content).execute()
+
+            // Prune to keep only 2 newest rolling backups on Drive
+            val listResult = drive.files().list()
+                .setSpaces("appDataFolder")
+                .setQ("name contains 'lists_backup_' and trashed = false")
+                .setFields("files(id, name, modifiedTime)")
+                .setOrderBy("modifiedTime desc")
+                .setPageSize(10)
+                .execute()
+
+            val backups = listResult.files ?: emptyList()
+            if (backups.size > 2) {
+                backups.drop(2).forEach { oldFile ->
+                    try {
+                        drive.files().delete(oldFile.id).execute()
+                    } catch (_: Exception) {}
+                }
+            }
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to upload rolling backup to Drive", e)
+            false
+        }
+    }
+
+    suspend fun listDriveRollingBackups(account: GoogleSignInAccount): List<DriveBackupInfo> = withContext(Dispatchers.IO) {
+        try {
+            val drive = getDriveService(account)
+            val listResult = drive.files().list()
+                .setSpaces("appDataFolder")
+                .setQ("name contains 'lists_backup_' and trashed = false")
+                .setFields("files(id, name, modifiedTime, size)")
+                .setOrderBy("modifiedTime desc")
+                .setPageSize(2)
+                .execute()
+
+            val files = listResult.files ?: emptyList()
+            files.take(2).mapIndexed { index, file ->
+                val time = file.modifiedTime?.value ?: System.currentTimeMillis()
+                val dateStr = java.text.SimpleDateFormat("MMM d, yyyy · h:mm a", java.util.Locale.getDefault()).format(java.util.Date(time))
+                val sizeKb = ((file.getSize() ?: 1024L) / 1024).coerceAtLeast(1)
+                DriveBackupInfo(
+                    fileId = file.id,
+                    name = "Drive Backup #${index + 1} (2/2)",
+                    timestamp = time,
+                    formattedDate = dateStr,
+                    formattedSize = "$sizeKb KB"
+                )
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun restoreDriveRollingBackup(account: GoogleSignInAccount, fileId: String, repository: AppRepository): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val drive = getDriveService(account)
+            val outputStream = ByteArrayOutputStream()
+            drive.files().get(fileId).executeMediaAndDownloadTo(outputStream)
+            val json = outputStream.toString(Charsets.UTF_8.name())
+            repository.importDataFromJson(json)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to restore Drive rolling backup", e)
+            false
+        }
     }
 
     /**
@@ -298,7 +391,10 @@ class DriveSyncManager(private val context: Context) {
             SyncResult.Error(e.message ?: "Unknown error")
         }
         when (result) {
-            is SyncResult.Success -> _syncStatus.value = SyncStatus.Success(lastSyncTimestamp)
+            is SyncResult.Success -> {
+                _syncStatus.value = SyncStatus.Success(lastSyncTimestamp)
+                uploadRollingBackupToDrive(account, repository)
+            }
             is SyncResult.Error -> _syncStatus.value = SyncStatus.Error(result.message)
             else -> _syncStatus.value = SyncStatus.Idle
         }
@@ -325,7 +421,10 @@ class DriveSyncManager(private val context: Context) {
             SyncResult.Error(e.message ?: "Unknown error")
         }
         when (result) {
-            is SyncResult.Success -> _syncStatus.value = SyncStatus.Success(lastSyncTimestamp)
+            is SyncResult.Success -> {
+                _syncStatus.value = SyncStatus.Success(lastSyncTimestamp)
+                uploadRollingBackupToDrive(account, repository)
+            }
             is SyncResult.Error -> _syncStatus.value = SyncStatus.Error(result.message)
             else -> _syncStatus.value = SyncStatus.Idle
         }

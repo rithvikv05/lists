@@ -43,7 +43,8 @@ data class EpisodeItem(
     val season: Int,
     val number: Int,
     val name: String,
-    val airdate: String = ""
+    val airdate: String = "",
+    val airstamp: String = ""
 ) {
     val key: String get() = "S${season}E${number}"
 }
@@ -1199,12 +1200,14 @@ class SearchRepository {
                 val number = obj["number"]?.jsonPrimitive?.intOrNull ?: 1
                 val name = obj["name"]?.jsonPrimitive?.content ?: "Episode $number"
                 val airdate = obj["airdate"]?.jsonPrimitive?.content ?: ""
+                val airstamp = obj["airstamp"]?.jsonPrimitive?.content ?: ""
 
                 EpisodeItem(
                     season = season,
                     number = number,
                     name = name,
-                    airdate = airdate
+                    airdate = airdate,
+                    airstamp = airstamp
                 )
             }
         } catch (_: Exception) {

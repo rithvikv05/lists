@@ -191,4 +191,24 @@ suspend fun uploadPackageToDrive(uploadUrl: String, token: String, manifestJson:
         )
     }
 
+fun jsGetCoverBlobUrl(uuid: String): String? = js("""(function() {
+    if (!uuid || !window.__lastDownloadedZip) return null;
+    window.__coverBlobCache = window.__coverBlobCache || {};
+    if (window.__coverBlobCache[uuid]) return window.__coverBlobCache[uuid];
+
+    var zip = window.__lastDownloadedZip;
+    var file = zip.file("covers/" + uuid + ".webp") ||
+               zip.file(uuid + ".webp") ||
+               zip.file("covers/" + uuid + ".jpg") ||
+               zip.file("covers/" + uuid + ".png");
+    if (!file) return null;
+
+    file.async("blob").then(function(blob) {
+        var url = URL.createObjectURL(blob);
+        window.__coverBlobCache[uuid] = url;
+    });
+    return window.__coverBlobCache[uuid] || null;
+})()""")
+
+
 

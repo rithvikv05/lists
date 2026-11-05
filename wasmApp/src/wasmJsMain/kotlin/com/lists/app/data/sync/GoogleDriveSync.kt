@@ -60,6 +60,7 @@ object GoogleDriveSync {
     fun init() {
         val token = accessToken
         if (token != null) {
+            DriveSyncManager.setStatus(DriveSyncManager.SyncStatus.Syncing)
             fetchUserInfoAndSync(token)
         }
     }
@@ -74,6 +75,7 @@ object GoogleDriveSync {
             jsRegisterTokenCallbacks(
                 onSuccess = { token ->
                     accessToken = token
+                    DriveSyncManager.setStatus(DriveSyncManager.SyncStatus.Syncing)
                     CoroutineScope(Dispatchers.Default).launch {
                         try {
                             val resp = client.get("https://www.googleapis.com/oauth2/v3/userinfo") {
@@ -98,17 +100,20 @@ object GoogleDriveSync {
                 },
                 onError = { err ->
                     println("Sign in failed: $err")
+                    DriveSyncManager.setStatus(DriveSyncManager.SyncStatus.Idle)
                     onComplete(false)
                 }
             )
             jsInitTokenClient(CLIENT_ID, SCOPES)
         } catch (e: Exception) {
             println("Sign in exception: ${e.message}")
+            DriveSyncManager.setStatus(DriveSyncManager.SyncStatus.Idle)
             onComplete(false)
         }
     }
 
     private fun fetchUserInfoAndSync(token: String) {
+        DriveSyncManager.setStatus(DriveSyncManager.SyncStatus.Syncing)
         CoroutineScope(Dispatchers.Default).launch {
             try {
                 val resp = client.get("https://www.googleapis.com/oauth2/v3/userinfo") {
@@ -124,6 +129,7 @@ object GoogleDriveSync {
                 syncNow()
             } catch (e: Exception) {
                 println("User info error: ${e.message}")
+                DriveSyncManager.setStatus(DriveSyncManager.SyncStatus.Idle)
             }
         }
     }
@@ -167,8 +173,8 @@ object GoogleDriveSync {
             originalTitle = obj["originalTitle"]?.jsonPrimitive?.contentOrNull ?: "",
             overview = obj["overview"]?.jsonPrimitive?.contentOrNull ?: "",
             creator = obj["creator"]?.jsonPrimitive?.contentOrNull ?: "",
-            coverUrl = obj["coverUrl"]?.jsonPrimitive?.contentOrNull ?: "",
-            backdropUrl = obj["backdropUrl"]?.jsonPrimitive?.contentOrNull ?: "",
+            coverUrl = (obj["coverUrl"]?.jsonPrimitive?.contentOrNull ?: "").replace("http://", "https://"),
+            backdropUrl = (obj["backdropUrl"]?.jsonPrimitive?.contentOrNull ?: "").replace("http://", "https://"),
             releaseDate = obj["releaseDate"]?.jsonPrimitive?.contentOrNull ?: "",
             releaseYear = obj["releaseYear"]?.jsonPrimitive?.contentOrNull ?: "",
             rating = obj["rating"]?.jsonPrimitive?.floatOrNull ?: 0f,
@@ -438,12 +444,14 @@ object GoogleDriveSync {
     }
 
     suspend fun syncNow(): Boolean {
+        DriveSyncManager.setStatus(DriveSyncManager.SyncStatus.Syncing)
         var token = accessToken
         if (token == null) {
             println("Sync: No access token stored. Attempting interactive token acquisition...")
             token = refreshTokenSilently()
             if (token == null) {
                 println("Sync: User not signed in and token not obtainable.")
+                DriveSyncManager.setStatus(DriveSyncManager.SyncStatus.Idle)
                 return false
             }
         }
@@ -618,16 +626,143 @@ object GoogleDriveSync {
                 }
                 println("Sync: Initial upload complete (${localBackup.lists.size} lists, ${localBackup.items.size} items)")
             }
-            WebStore.setLastSync(currentTimeMillis())
+            val now = currentTimeMillis()
+            WebStore.setLastSync(now)
+            DriveSyncManager.setStatus(DriveSyncManager.SyncStatus.Success(now))
             println("Sync: ✅ Sync completed successfully")
+
+            // Maintain strictly last 2 rolling backups on Drive
+            try {
+                uploadDriveRollingBackup(exportAndroidFormat(WebStore.createBackup()))
+            } catch (e: Exception) {
+                println("Sync: Rolling backup to Drive failed: ${e.message}")
+            }
+
             true
         } catch (e: Exception) {
             println("Sync FAILED: ${e.message}")
+            DriveSyncManager.setStatus(DriveSyncManager.SyncStatus.Error(e.message ?: "Sync error"))
             e.printStackTrace()
             false
         }
     }
+
+    /**
+     * Upload rolling snapshot to Google Drive appDataFolder and keep only the 2 newest.
+     */
+    suspend fun uploadDriveRollingBackup(jsonStr: String): Boolean {
+        val token = accessToken ?: return false
+        return try {
+            val boundary = "backup_boundary_123"
+            val delimiter = "\r\n--$boundary\r\n"
+            val closeDelimiter = "\r\n--$boundary--"
+            val fileName = "lists_backup_${currentTimeMillis()}.json"
+            val metadata = "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+                    """{"name": "$fileName", "parents": ["appDataFolder"]}"""
+            val multipartBody = delimiter + metadata + delimiter +
+                    "Content-Type: application/json\r\n\r\n" + jsonStr + closeDelimiter
+
+            val createResp = client.post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart") {
+                header(HttpHeaders.Authorization, "Bearer $token")
+                header("Content-Type", "multipart/related; boundary=\"$boundary\"")
+                setBody(multipartBody)
+            }
+            if (createResp.status != HttpStatusCode.OK) return false
+
+            // Prune to keep 2 newest
+            val listResp = client.get("https://www.googleapis.com/drive/v3/files") {
+                header(HttpHeaders.Authorization, "Bearer $token")
+                parameter("spaces", "appDataFolder")
+                parameter("q", "name contains 'lists_backup_' and trashed=false")
+                parameter("fields", "files(id,name,modifiedTime)")
+                parameter("orderBy", "modifiedTime desc")
+                parameter("pageSize", 10)
+            }
+            if (listResp.status == HttpStatusCode.OK) {
+                val listObj = json.parseToJsonElement(listResp.bodyAsText()).jsonObject
+                val files = listObj["files"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
+                if (files.size > 2) {
+                    files.drop(2).forEach { oldFile ->
+                        val oldId = oldFile["id"]?.jsonPrimitive?.contentOrNull
+                        if (oldId != null) {
+                            try {
+                                client.delete("https://www.googleapis.com/drive/v3/files/$oldId") {
+                                    header(HttpHeaders.Authorization, "Bearer $token")
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+            true
+        } catch (e: Exception) {
+            println("Drive rolling backup error: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun listDriveRollingBackups(): List<WebStore.BackupInfo> {
+        val token = accessToken ?: return emptyList()
+        return try {
+            val resp = client.get("https://www.googleapis.com/drive/v3/files") {
+                header(HttpHeaders.Authorization, "Bearer $token")
+                parameter("spaces", "appDataFolder")
+                parameter("q", "name contains 'lists_backup_' and trashed=false")
+                parameter("fields", "files(id,name,modifiedTime,size)")
+                parameter("orderBy", "modifiedTime desc")
+                parameter("pageSize", 2)
+            }
+            if (resp.status == HttpStatusCode.OK) {
+                val obj = json.parseToJsonElement(resp.bodyAsText()).jsonObject
+                val files = obj["files"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
+                files.take(2).mapIndexed { idx, file ->
+                    val fileId = file["id"]?.jsonPrimitive?.contentOrNull ?: ""
+                    val modTimeStr = file["modifiedTime"]?.jsonPrimitive?.contentOrNull ?: ""
+                    val sizeKb = ((file["size"]?.jsonPrimitive?.longOrNull ?: 1024L) / 1024).coerceAtLeast(1)
+                    val ts = try {
+                        jsParseDate(modTimeStr).toLong()
+                    } catch (_: Exception) { currentTimeMillis() }
+                    val dateFormatted = try {
+                        jsFormatDate(ts.toDouble())
+                    } catch (_: Exception) { "Backup #${idx + 1}" }
+
+                    WebStore.BackupInfo(
+                        key = "drive_backup_$fileId",
+                        label = "Google Drive Rolling Backup #${idx + 1} (2/2)",
+                        timestamp = ts,
+                        summary = "$dateFormatted · $sizeKb KB",
+                        isDrive = true,
+                        driveFileId = fileId
+                    )
+                }
+            } else emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun restoreDriveRollingBackup(fileId: String): Boolean {
+        val token = accessToken ?: return false
+        return try {
+            val resp = client.get("https://www.googleapis.com/drive/v3/files/$fileId?alt=media") {
+                header(HttpHeaders.Authorization, "Bearer $token")
+            }
+            if (resp.status == HttpStatusCode.OK) {
+                val jsonStr = resp.bodyAsText()
+                val backup = parseRemoteJson(jsonStr)
+                if (backup != null) {
+                    WebStore.restoreBackupJson(exportAndroidFormat(backup))
+                } else false
+            } else false
+        } catch (e: Exception) {
+            println("Drive backup restore error: ${e.message}")
+            false
+        }
+    }
 }
+
+private fun jsParseDate(dateStr: String): Double = js("Date.parse(dateStr)")
+private fun jsFormatDate(timestamp: Double): String = js("new Date(timestamp).toLocaleString()")
 
 private fun jsInitTokenClient(clientId: String, scopes: String): Unit = js("""{
     if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {

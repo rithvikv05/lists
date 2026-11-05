@@ -8,6 +8,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -425,15 +426,17 @@ fun DiscreteListCard(
     itemCount: Int,
     completedCount: Int = 0,
     isPinned: Boolean = false,
+    selected: Boolean = false,
+    selectionMode: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerLow,
         shadowElevation = 1.5.dp,
-        border = null,
+        border = if (selected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
@@ -465,18 +468,34 @@ fun DiscreteListCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = "$itemCount items",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (isPinned) {
-                        Icon(
-                            imageVector = Icons.Default.PushPin,
-                            contentDescription = "Pinned",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
+                    if (selected) {
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .background(MaterialTheme.colorScheme.primary, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Selected",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = "$itemCount items",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (isPinned) {
+                            Icon(
+                                imageVector = Icons.Default.PushPin,
+                                contentDescription = "Pinned",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -537,6 +556,8 @@ fun BentoCollectionCard(
     itemCount: Int,
     completedCount: Int = 0,
     isPinned: Boolean = false,
+    selected: Boolean = false,
+    selectionMode: Boolean = false,
     previewItems: List<ListItem> = emptyList(),
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
@@ -544,9 +565,9 @@ fun BentoCollectionCard(
 ) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerLow,
         shadowElevation = 1.5.dp,
-        border = null,
+        border = if (selected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = modifier
             .fillMaxWidth()
             .height(138.dp)
@@ -562,7 +583,7 @@ fun BentoCollectionCard(
                 .fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Line 1: Category Tag (UPPERCASE) and Pin Icon (if pinned, in accent color)
+            // Line 1: Category Tag (UPPERCASE) and Pin Icon / Check badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -576,13 +597,32 @@ fun BentoCollectionCard(
                     letterSpacing = 0.5.sp
                 )
 
-                if (isPinned) {
-                    Icon(
-                        imageVector = Icons.Default.PushPin,
-                        contentDescription = "Pinned",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
-                    )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (selected) {
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .background(MaterialTheme.colorScheme.primary, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Selected",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                    } else if (isPinned) {
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = "Pinned",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
 
@@ -1427,6 +1467,8 @@ fun GridMediaCard(
     item: ListItem,
     category: Category,
     scale: RatingScaleOption = RatingScaleOption.SCALE_10,
+    selected: Boolean = false,
+    selectionMode: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     onToggleComplete: (() -> Unit)? = null,
@@ -1445,7 +1487,11 @@ fun GridMediaCard(
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .clip(RoundedCornerShape(12.dp))
-                .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                .border(
+                    if (selected) 2.dp else 0.5.dp,
+                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                    RoundedCornerShape(12.dp)
+                )
         ) {
             CoverImage(
                 url = item.coverUrl,
@@ -1453,6 +1499,25 @@ fun GridMediaCard(
                 uuid = item.uuid,
                 modifier = Modifier.fillMaxSize()
             )
+
+            // Multi-select check badge on top-end
+            if (selected) {
+                Box(
+                    modifier = Modifier
+                        .padding(6.dp)
+                        .align(Alignment.TopEnd)
+                        .size(24.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Selected",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+            }
 
             // Pin badge on top-left if pinned (Adapts to light accent / dark theme)
             if (item.pinned) {
@@ -1501,33 +1566,35 @@ fun GridMediaCard(
             }
 
             // Accented Material 3 completion circle on lower right corner
-            Box(
-                modifier = Modifier
-                    .padding(6.dp)
-                    .align(Alignment.BottomEnd)
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (item.marked) MaterialTheme.colorScheme.primary
-                        else Color.Black.copy(alpha = 0.55f)
-                    )
-                    .border(
-                        width = if (item.marked) 0.dp else 1.5.dp,
-                        color = if (item.marked) Color.Transparent else Color.White.copy(alpha = 0.6f),
-                        shape = CircleShape
-                    )
-                    .clickable {
-                        onToggleComplete?.invoke()
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                if (item.marked) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = "Completed",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
+            if (!selectionMode) {
+                Box(
+                    modifier = Modifier
+                        .padding(6.dp)
+                        .align(Alignment.BottomEnd)
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (item.marked) MaterialTheme.colorScheme.primary
+                            else Color.Black.copy(alpha = 0.55f)
+                        )
+                        .border(
+                            width = if (item.marked) 0.dp else 1.5.dp,
+                            color = if (item.marked) Color.Transparent else Color.White.copy(alpha = 0.6f),
+                            shape = CircleShape
+                        )
+                        .clickable {
+                            onToggleComplete?.invoke()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (item.marked) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Completed",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
         }
@@ -1537,10 +1604,18 @@ fun GridMediaCard(
         Text(
             text = item.title,
             style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Start,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            modifier = Modifier
+                .fillMaxWidth()
+                .basicMarquee(
+                    iterations = Int.MAX_VALUE,
+                    repeatDelayMillis = 1000,
+                    initialDelayMillis = 1200,
+                    velocity = 35.dp
+                )
         )
     }
 }
@@ -1554,6 +1629,8 @@ fun ListMediaRow(
     item: ListItem,
     category: Category,
     scale: RatingScaleOption,
+    selected: Boolean = false,
+    selectionMode: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     onToggleComplete: (() -> Unit)? = null,
@@ -1561,9 +1638,9 @@ fun ListMediaRow(
 ) {
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerLow,
         shadowElevation = 1.dp,
-        border = null,
+        border = if (selected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
@@ -1591,10 +1668,17 @@ fun ListMediaRow(
                 Text(
                     text = item.title,
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .basicMarquee(
+                            iterations = Int.MAX_VALUE,
+                            repeatDelayMillis = 1000,
+                            initialDelayMillis = 1200,
+                            velocity = 35.dp
+                        )
                 )
 
                 val meta = listOf(item.creator, item.releaseYear).filter { it.isNotBlank() }.joinToString(" · ")
@@ -1611,46 +1695,65 @@ fun ListMediaRow(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // In list mode: keep progress ring right to the left of the completed circle
-            val progressPct = getItemProgressPercentage(item, category)
-            if (progressPct != null) {
-                Spacer(modifier = Modifier.width(8.dp))
-                Material3CircularProgressIndicator(
-                    percentage = progressPct,
-                    size = 20.dp,
-                    strokeWidth = 3.0.dp,
-                    showCheckWhenComplete = false
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Accented Material 3 completion circle on right end
-            Box(
-                modifier = Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (item.marked) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
-                    )
-                    .border(
-                        width = if (item.marked) 0.dp else 1.5.dp,
-                        color = if (item.marked) Color.Transparent else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
-                        shape = CircleShape
-                    )
-                    .clickable {
-                        onToggleComplete?.invoke()
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                if (item.marked) {
+            // Multi-select check badge
+            if (selected) {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
                         imageVector = Icons.Default.Check,
-                        contentDescription = "Completed",
+                        contentDescription = "Selected",
                         tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
+                }
+            } else {
+                // In list mode: keep progress ring right to the left of the completed circle
+                val progressPct = getItemProgressPercentage(item, category)
+                if (progressPct != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Material3CircularProgressIndicator(
+                        percentage = progressPct,
+                        size = 20.dp,
+                        strokeWidth = 3.0.dp,
+                        showCheckWhenComplete = false
+                    )
+                }
+
+                if (!selectionMode) {
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // Accented Material 3 completion circle on right end
+                    Box(
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (item.marked) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
+                            )
+                            .border(
+                                width = if (item.marked) 0.dp else 1.5.dp,
+                                color = if (item.marked) Color.Transparent else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+                                shape = CircleShape
+                            )
+                            .clickable {
+                                onToggleComplete?.invoke()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (item.marked) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Completed",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
                 }
             }
         }

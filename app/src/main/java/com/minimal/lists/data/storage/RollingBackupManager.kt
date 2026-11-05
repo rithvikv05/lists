@@ -25,7 +25,7 @@ class RollingBackupManager(private val context: Context) {
 
     suspend fun listSnapshots(): List<BackupSnapshot> = withContext(Dispatchers.IO) {
         val files = snapshotDir.listFiles { f -> f.extension == "json" } ?: emptyArray()
-        files.sortedByDescending { it.lastModified() }.take(3).mapIndexed { index, file ->
+        files.sortedByDescending { it.lastModified() }.take(1).mapIndexed { index, file ->
             var items = 0
             var lists = 0
             var time = file.lastModified()
@@ -55,12 +55,10 @@ class RollingBackupManager(private val context: Context) {
     suspend fun captureSnapshot(repository: AppRepository): Boolean = withContext(Dispatchers.IO) {
         try {
             val json = repository.exportDataToJson()
-            // Rotate snapshots if >= 3
+            // Keep strictly 1 local rolling snapshot
             val existing = snapshotDir.listFiles { f -> f.extension == "json" } ?: emptyArray()
-            if (existing.size >= 3) {
-                existing.minByOrNull { it.lastModified() }?.delete()
-            }
-            val newFile = File(snapshotDir, "snapshot_${System.currentTimeMillis()}.json")
+            existing.forEach { it.delete() }
+            val newFile = File(snapshotDir, "snapshot_latest.json")
             newFile.writeText(json)
             true
         } catch (_: Exception) {

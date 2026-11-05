@@ -1,6 +1,7 @@
 package com.minimal.lists.ui.screens
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.*
@@ -138,6 +140,12 @@ fun ListDetailScreen(
     var itemForOptions by remember { mutableStateOf<ListItem?>(null) }
     var itemToEdit by remember { mutableStateOf<ListItem?>(null) }
     var itemToDelete by remember { mutableStateOf<ListItem?>(null) }
+    var selectedItemIds by remember { mutableStateOf(emptySet<Long>()) }
+    var showBulkDeleteDialog by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = selectedItemIds.isNotEmpty()) {
+        selectedItemIds = emptySet()
+    }
 
     val category = list?.let { Category.fromId(it.category) } ?: Category.MOVIE
 
@@ -228,12 +236,13 @@ fun ListDetailScreen(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         floatingActionButton = {
-            // 2D Minimal, Flush "Add Item" Box (No shadows, No + plus icon, centered text, matching New List and Create List)
-            Surface(
-                onClick = {
-                    triggerStrongTick(context)
-                    onNavigateToAddItem(listId, null)
-                },
+            if (selectedItemIds.isEmpty()) {
+                // 2D Minimal, Flush "Add Item" Box (No shadows, No + plus icon, centered text, matching New List and Create List)
+                Surface(
+                    onClick = {
+                        triggerStrongTick(context)
+                        onNavigateToAddItem(listId, null)
+                    },
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -256,6 +265,7 @@ fun ListDetailScreen(
                 }
             }
         }
+    }
     ) { padding ->
         Box(
             modifier = Modifier
@@ -280,108 +290,194 @@ fun ListDetailScreen(
                     .padding(horizontal = if (isWideLayout) 24.dp else 16.dp)
             ) {
                 // Top Header Row matching Stitch Screen #17 (Zero extra black gap)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(top = 16.dp, bottom = 8.dp)
-                        .height(44.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (isWideLayout) {
+                if (selectedItemIds.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(top = 16.dp, bottom = 8.dp)
+                            .height(44.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = {
+                                triggerStrongTick(context)
+                                selectedItemIds = emptySet()
+                            }) {
+                                Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurface)
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "${selectedItemIds.size} selected",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.weight(1f)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text(
-                                text = list?.name ?: "List",
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontSize = 26.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = (-0.5).sp,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                modifier = Modifier
-                                    .align(Alignment.CenterVertically)
-                                    .offset(y = 2.dp)
-                            ) {
-                                Text(
-                                    text = "${rawItems.size} Items • ${rawItems.count { it.marked }} Done",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            // Select All
+                            IconButton(onClick = {
+                                triggerAsmrTick(context)
+                                selectedItemIds = if (selectedItemIds.size == filteredItems.size) emptySet() else filteredItems.map { it.id }.toSet()
+                            }) {
+                                Icon(Icons.Default.SelectAll, contentDescription = "Select All", tint = MaterialTheme.colorScheme.onSurface)
+                            }
+
+                            // Bulk Mark / Unmark
+                            val selectedItems = filteredItems.filter { selectedItemIds.contains(it.id) }
+                            val anyUnmarked = selectedItems.any { !it.marked }
+                            IconButton(onClick = {
+                                triggerStrongTick(context)
+                                scope.launch {
+                                    repository.setItemsMarked(selectedItems, anyUnmarked)
+                                    selectedItemIds = emptySet()
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = if (anyUnmarked) Icons.Default.CheckCircle else Icons.Default.Check,
+                                    contentDescription = if (anyUnmarked) "Mark $completedLabel" else "Unmark $completedLabel",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            // Bulk Pin / Unpin
+                            val anyUnpinned = selectedItems.any { !it.pinned }
+                            IconButton(onClick = {
+                                triggerStrongTick(context)
+                                scope.launch {
+                                    repository.setItemsPinned(selectedItems, anyUnpinned)
+                                    selectedItemIds = emptySet()
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.PushPin,
+                                    contentDescription = "Pin/Unpin",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            // Bulk Delete
+                            IconButton(onClick = {
+                                triggerStrongTick(context)
+                                showBulkDeleteDialog = true
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Delete",
+                                    tint = MaterialTheme.colorScheme.error
                                 )
                             }
                         }
-                    } else {
-                        IconButton(
-                            onClick = onNavigateBack,
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
                     }
-
+                } else {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(top = 16.dp, bottom = 8.dp)
+                            .height(44.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (!isWideLayout) {
+                        if (isWideLayout) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = list?.name ?: "List",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontSize = 26.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = (-0.5).sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    modifier = Modifier
+                                        .align(Alignment.CenterVertically)
+                                        .offset(y = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "${rawItems.size} Items • ${rawItems.count { it.marked }} Done",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        } else {
                             IconButton(
-                                onClick = {
-                                    isSearchActive = !isSearchActive
-                                    if (!isSearchActive) {
-                                        focusManager.clearFocus()
-                                        searchQuery = ""
-                                    }
-                                },
+                                onClick = onNavigateBack,
                                 modifier = Modifier.size(40.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
-                                    contentDescription = "Search",
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (!isWideLayout) {
+                                IconButton(
+                                    onClick = {
+                                        isSearchActive = !isSearchActive
+                                        if (!isSearchActive) {
+                                            focusManager.clearFocus()
+                                            searchQuery = ""
+                                        }
+                                    },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
+                                        contentDescription = "Search",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            IconButton(
+                                onClick = { showSortSheet = true },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Sort,
+                                    contentDescription = "Sort",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
-                        }
 
-                        IconButton(
-                            onClick = { showSortSheet = true },
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Sort,
-                                contentDescription = "Sort",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { showOptionsSheet = true },
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.MoreVert,
-                                contentDescription = "Options",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            IconButton(
+                                onClick = { showOptionsSheet = true },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Options",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -586,15 +682,26 @@ fun ListDetailScreen(
                     ) {
                         // 1. Pinned Items
                         if (sortedPinned.isNotEmpty()) {
-                            items(sortedPinned, key = { it.id }) { item ->
+                            items(sortedPinned, key = { "pinned_${it.id}" }) { item ->
+                                val isSelected = selectedItemIds.contains(item.id)
+                                val inSelectionMode = selectedItemIds.isNotEmpty()
                                 GridMediaCard(
                                     item = item,
                                     category = category,
                                     scale = activeScale,
-                                    onClick = { onNavigateToItemDetail(item.id) },
+                                    selected = isSelected,
+                                    selectionMode = inSelectionMode,
+                                    onClick = {
+                                        if (inSelectionMode) {
+                                            triggerAsmrTick(context)
+                                            selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
+                                        } else {
+                                            onNavigateToItemDetail(item.id)
+                                        }
+                                    },
                                     onLongClick = {
                                         triggerStrongTick(context)
-                                        itemForOptions = item
+                                        selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
                                     },
                                     onToggleComplete = {
                                         focusManager.clearFocus()
@@ -616,15 +723,26 @@ fun ListDetailScreen(
 
                         // 2. To-Be-Done / Remaining Items
                         if (sortedRemaining.isNotEmpty()) {
-                            items(sortedRemaining, key = { it.id }) { item ->
+                            items(sortedRemaining, key = { "remaining_${it.id}" }) { item ->
+                                val isSelected = selectedItemIds.contains(item.id)
+                                val inSelectionMode = selectedItemIds.isNotEmpty()
                                 GridMediaCard(
                                     item = item,
                                     category = category,
                                     scale = activeScale,
-                                    onClick = { onNavigateToItemDetail(item.id) },
+                                    selected = isSelected,
+                                    selectionMode = inSelectionMode,
+                                    onClick = {
+                                        if (inSelectionMode) {
+                                            triggerAsmrTick(context)
+                                            selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
+                                        } else {
+                                            onNavigateToItemDetail(item.id)
+                                        }
+                                    },
                                     onLongClick = {
                                         triggerStrongTick(context)
-                                        itemForOptions = item
+                                        selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
                                     },
                                     onToggleComplete = {
                                         focusManager.clearFocus()
@@ -646,15 +764,26 @@ fun ListDetailScreen(
 
                         // 3. Completed Items (Default sorted to the bottom)
                         if (sortedCompleted.isNotEmpty()) {
-                            items(sortedCompleted, key = { it.id }) { item ->
+                            items(sortedCompleted, key = { "completed_${it.id}" }) { item ->
+                                val isSelected = selectedItemIds.contains(item.id)
+                                val inSelectionMode = selectedItemIds.isNotEmpty()
                                 GridMediaCard(
                                     item = item,
                                     category = category,
                                     scale = activeScale,
-                                    onClick = { onNavigateToItemDetail(item.id) },
+                                    selected = isSelected,
+                                    selectionMode = inSelectionMode,
+                                    onClick = {
+                                        if (inSelectionMode) {
+                                            triggerAsmrTick(context)
+                                            selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
+                                        } else {
+                                            onNavigateToItemDetail(item.id)
+                                        }
+                                    },
                                     onLongClick = {
                                         triggerStrongTick(context)
-                                        itemForOptions = item
+                                        selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
                                     },
                                     onToggleComplete = {
                                         focusManager.clearFocus()
@@ -676,15 +805,26 @@ fun ListDetailScreen(
                     ) {
                         // 1. Pinned Items
                         if (sortedPinned.isNotEmpty()) {
-                            items(sortedPinned, key = { it.id }) { item ->
+                            items(sortedPinned, key = { "pinned_${it.id}" }) { item ->
+                                val isSelected = selectedItemIds.contains(item.id)
+                                val inSelectionMode = selectedItemIds.isNotEmpty()
                                 ListMediaRow(
                                     item = item,
                                     category = category,
                                     scale = activeScale,
-                                    onClick = { onNavigateToItemDetail(item.id) },
+                                    selected = isSelected,
+                                    selectionMode = inSelectionMode,
+                                    onClick = {
+                                        if (inSelectionMode) {
+                                            triggerAsmrTick(context)
+                                            selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
+                                        } else {
+                                            onNavigateToItemDetail(item.id)
+                                        }
+                                    },
                                     onLongClick = {
                                         triggerStrongTick(context)
-                                        itemForOptions = item
+                                        selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
                                     },
                                     onToggleComplete = {
                                         focusManager.clearFocus()
@@ -706,15 +846,26 @@ fun ListDetailScreen(
 
                         // 2. To-Be-Done / Remaining Items
                         if (sortedRemaining.isNotEmpty()) {
-                            items(sortedRemaining, key = { it.id }) { item ->
+                            items(sortedRemaining, key = { "remaining_${it.id}" }) { item ->
+                                val isSelected = selectedItemIds.contains(item.id)
+                                val inSelectionMode = selectedItemIds.isNotEmpty()
                                 ListMediaRow(
                                     item = item,
                                     category = category,
                                     scale = activeScale,
-                                    onClick = { onNavigateToItemDetail(item.id) },
+                                    selected = isSelected,
+                                    selectionMode = inSelectionMode,
+                                    onClick = {
+                                        if (inSelectionMode) {
+                                            triggerAsmrTick(context)
+                                            selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
+                                        } else {
+                                            onNavigateToItemDetail(item.id)
+                                        }
+                                    },
                                     onLongClick = {
                                         triggerStrongTick(context)
-                                        itemForOptions = item
+                                        selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
                                     },
                                     onToggleComplete = {
                                         focusManager.clearFocus()
@@ -736,15 +887,26 @@ fun ListDetailScreen(
 
                         // 3. Completed Items (Default sorted to the bottom)
                         if (sortedCompleted.isNotEmpty()) {
-                            items(sortedCompleted, key = { it.id }) { item ->
+                            items(sortedCompleted, key = { "completed_${it.id}" }) { item ->
+                                val isSelected = selectedItemIds.contains(item.id)
+                                val inSelectionMode = selectedItemIds.isNotEmpty()
                                 ListMediaRow(
                                     item = item,
                                     category = category,
                                     scale = activeScale,
-                                    onClick = { onNavigateToItemDetail(item.id) },
+                                    selected = isSelected,
+                                    selectionMode = inSelectionMode,
+                                    onClick = {
+                                        if (inSelectionMode) {
+                                            triggerAsmrTick(context)
+                                            selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
+                                        } else {
+                                            onNavigateToItemDetail(item.id)
+                                        }
+                                    },
                                     onLongClick = {
                                         triggerStrongTick(context)
-                                        itemForOptions = item
+                                        selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
                                     },
                                     onToggleComplete = {
                                         focusManager.clearFocus()
@@ -761,7 +923,7 @@ fun ListDetailScreen(
             }
 
             // SINGLE TITLE THAT PHYSICALLY FLOWS AND SHRINKS/EXPANDS BETWEEN BODY AND HEADER (Phone / Portrait only)
-            if (!isWideLayout) {
+            if (!isWideLayout && selectedItemIds.isEmpty()) {
                 Text(
                     text = list?.name ?: "List",
                     fontSize = titleFontSize,
@@ -1389,6 +1551,52 @@ fun ListDetailScreen(
             },
             dismissButton = {
                 TextButton(onClick = { itemToDelete = null }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Bulk Delete Items Confirmation Modal
+    if (showBulkDeleteDialog) {
+        val count = selectedItemIds.size
+        AlertDialog(
+            onDismissRequest = { showBulkDeleteDialog = false },
+            title = {
+                Text("Delete $count items?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    "Are you sure you want to delete these $count items? This action cannot be undone.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val idsToDelete = selectedItemIds
+                        showBulkDeleteDialog = false
+                        selectedItemIds = emptySet()
+                        triggerStrongTick(context)
+                        scope.launch {
+                            val targets = rawItems.filter { idsToDelete.contains(it.id) }
+                            repository.deleteItems(targets)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBulkDeleteDialog = false }) {
                     Text("Cancel")
                 }
             },

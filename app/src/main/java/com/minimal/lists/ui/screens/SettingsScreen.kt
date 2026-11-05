@@ -101,6 +101,8 @@ fun SettingsScreen(
     val rollingBackupManager = remember { RollingBackupManager(context) }
     var snapshots by remember { mutableStateOf<List<BackupSnapshot>>(emptyList()) }
     var snapshotToRestore by remember { mutableStateOf<BackupSnapshot?>(null) }
+    var driveSnapshots by remember { mutableStateOf<List<DriveSyncManager.DriveBackupInfo>>(emptyList()) }
+    var driveSnapshotToRestore by remember { mutableStateOf<DriveSyncManager.DriveBackupInfo?>(null) }
 
     val signInHelper = remember { GoogleSignInHelper(context) }
     val syncManager = remember { DriveSyncManager(context) }
@@ -108,10 +110,17 @@ fun SettingsScreen(
     var autoSyncEnabled by remember { mutableStateOf(syncManager.autoSyncEnabled) }
     var isSyncing by remember { mutableStateOf(false) }
 
+    val settingsPrefs = remember { context.getSharedPreferences("lists_settings_prefs", Context.MODE_PRIVATE) }
+    var fallbackHour by remember { mutableStateOf(settingsPrefs.getInt("fallback_reminder_hour", 9)) }
+    var fallbackMinute by remember { mutableStateOf(settingsPrefs.getInt("fallback_reminder_minute", 0)) }
+
     // Load snapshots on entry and trigger auto-snapshot
-    LaunchedEffect(Unit) {
+    LaunchedEffect(signedInAccount) {
         rollingBackupManager.captureSnapshot(repository)
         snapshots = rollingBackupManager.listSnapshots()
+        if (signedInAccount != null) {
+            driveSnapshots = syncManager.listDriveRollingBackups(signedInAccount!!)
+        }
     }
 
     val signInLauncher = rememberLauncherForActivityResult(
@@ -735,67 +744,107 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // 2. Rolling Backups (No clock icons, responsive layout fitting without breaking)
+                        // 2. Rolling Backups (1 Local · 2 Google Drive)
                         Text(
-                            text = "Local Snapshots",
+                            text = "Rolling Backups",
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        if (snapshots.isEmpty()) {
-                            Text(
-                                text = "Snapshots are automatically created as you make changes.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                snapshots.forEachIndexed { idx, snapshot ->
-                                    val isLatest = idx == 0
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = MaterialTheme.colorScheme.surfaceContainer,
-                                        modifier = Modifier.fillMaxWidth()
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // 1 Local Snapshot
+                            snapshots.forEach { snapshot ->
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                                                Text(
-                                                    text = if (isLatest) "Snapshot #${3 - idx} (Latest)" else "Snapshot #${3 - idx}",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Text(
-                                                    text = "${snapshot.formattedDate} • ${snapshot.itemCount} items • ${snapshot.formattedSize}",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
+                                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                            Text(
+                                                text = "Local Backup (1/1)",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "${snapshot.formattedDate} • ${snapshot.itemCount} items • ${snapshot.formattedSize}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
 
-                                            Button(
-                                                onClick = { snapshotToRestore = snapshot },
-                                                shape = RoundedCornerShape(8.dp),
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                                    contentColor = MaterialTheme.colorScheme.onSurface
-                                                ),
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                                                modifier = Modifier.height(30.dp)
-                                            ) {
-                                                Text("Restore", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                            }
+                                        Button(
+                                            onClick = { snapshotToRestore = snapshot },
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                contentColor = MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                            modifier = Modifier.height(30.dp)
+                                        ) {
+                                            Text("Restore", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 2 Google Drive Backups
+                            driveSnapshots.forEach { driveSnap ->
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                            Text(
+                                                text = driveSnap.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "${driveSnap.formattedDate} • ${driveSnap.formattedSize}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        Button(
+                                            onClick = { driveSnapshotToRestore = driveSnap },
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                contentColor = MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                            modifier = Modifier.height(30.dp)
+                                        ) {
+                                            Text("Restore", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -918,7 +967,87 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(24.dp))
 
                 // =========================================================================
-                // SECTION 3: ABOUT (No icon in heading)
+                // SECTION 3: NOTIFICATIONS & REMINDERS
+                // =========================================================================
+                Text(
+                    text = "NOTIFICATIONS & REMINDERS",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    triggerAsmrTick(context)
+                                    android.app.TimePickerDialog(
+                                        context,
+                                        { _, h, m ->
+                                            fallbackHour = h
+                                            fallbackMinute = m
+                                            settingsPrefs.edit()
+                                                .putInt("fallback_reminder_hour", h)
+                                                .putInt("fallback_reminder_minute", m)
+                                                .apply()
+                                        },
+                                        fallbackHour,
+                                        fallbackMinute,
+                                        false
+                                    ).show()
+                                },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    text = "Fallback Reminder Time",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Alert time when exact episode airtime is unavailable",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            val ampm = if (fallbackHour < 12) "AM" else "PM"
+                            val displayHour = if (fallbackHour == 0) 12 else if (fallbackHour > 12) fallbackHour - 12 else fallbackHour
+                            val formattedTime = String.format(java.util.Locale.ENGLISH, "%02d:%02d %s", displayHour, fallbackMinute, ampm)
+
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
+                                    Text(
+                                        text = formattedTime,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // =========================================================================
+                // SECTION 4: ABOUT (No icon in heading)
                 // =========================================================================
                 Text(
                     text = "ABOUT",
@@ -993,6 +1122,56 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { snapshotToRestore = null }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Restore Drive Snapshot Confirmation Dialog
+    driveSnapshotToRestore?.let { driveSnap ->
+        AlertDialog(
+            onDismissRequest = { driveSnapshotToRestore = null },
+            title = {
+                Text(
+                    text = "Restore Drive Backup?",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Restore state from ${driveSnap.name} (${driveSnap.formattedDate})? This will replace your current library state.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val account = signedInAccount
+                        if (account != null) {
+                            coroutineScope.launch {
+                                val success = syncManager.restoreDriveRollingBackup(account, driveSnap.fileId, repository)
+                                driveSnapshotToRestore = null
+                                if (success) {
+                                    Toast.makeText(context, "Restored Drive backup successfully", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Failed to restore Drive backup", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        } else {
+                            driveSnapshotToRestore = null
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Restore")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { driveSnapshotToRestore = null }) {
                     Text("Cancel")
                 }
             },
