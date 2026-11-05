@@ -200,8 +200,21 @@ class AppRepository(val context: Any? = null) {
         WebStore.updateItem(item.copy(reviewRating = reviewRating, updatedAt = currentTimeMillis()))
     }
 
-    suspend fun saveCachedEpisodes(item: ListItem, episodesJson: String) {
-        WebStore.updateItem(item.copy(episodesDataJson = episodesJson, updatedAt = currentTimeMillis()))
+    suspend fun updateItemRating(item: ListItem, userRating: Float) {
+        WebStore.updateItem(item.copy(userRating = userRating, updatedAt = currentTimeMillis()))
+    }
+
+    suspend fun updateItemNotes(item: ListItem, notes: String) {
+        WebStore.updateItem(item.copy(userNotes = notes, updatedAt = currentTimeMillis()))
+    }
+
+    suspend fun updateItemLoggedMinutes(item: ListItem, minutes: Int) {
+        WebStore.updateItem(item.copy(loggedMinutes = minutes, updatedAt = currentTimeMillis()))
+    }
+
+    suspend fun saveCachedEpisodes(item: ListItem, episodesJson: String, episodeCount: Int = 0) {
+        val total = if (episodeCount > 0) episodeCount else item.totalEpisodes
+        WebStore.updateItem(item.copy(episodesDataJson = episodesJson, totalEpisodes = total, updatedAt = currentTimeMillis()))
     }
 
     fun parseCheckedKeys(jsonStr: String): Set<String> {
@@ -228,9 +241,12 @@ class AppRepository(val context: Any? = null) {
         }
         val now = currentTimeMillis()
         val jsonArray = json.encodeToString(currentSet.toList())
+        val count = currentSet.size
         WebStore.updateItem(
             item.copy(
                 checkedEpisodesJson = jsonArray,
+                currentEpisode = count,
+                currentPage = count,
                 marked = allCompleted,
                 status = newStatus,
                 markedAt = if (allCompleted) now else null,
@@ -259,9 +275,12 @@ class AppRepository(val context: Any? = null) {
         }
         val now = currentTimeMillis()
         val jsonArray = json.encodeToString(currentSet.toList())
+        val count = currentSet.size
         WebStore.updateItem(
             item.copy(
                 checkedEpisodesJson = jsonArray,
+                currentEpisode = count,
+                currentPage = count,
                 marked = allCompleted,
                 status = newStatus,
                 markedAt = if (allCompleted) now else null,

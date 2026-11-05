@@ -182,24 +182,37 @@ class WebPreferences(private val prefix: String) : android.content.SharedPrefere
     }
 }
 
-class WebContext {
+class WebContext : android.content.Context() {
     private val prefsMap = mutableMapOf<String, WebPreferences>()
 
-    fun getSharedPreferences(name: String, mode: Int = 0): WebPreferences {
+    override fun getSharedPreferences(name: String, mode: Int): WebPreferences {
         return prefsMap.getOrPut(name) { WebPreferences(name) }
     }
 
-    fun startActivity(intent: android.content.Intent) {
+    override fun startActivity(intent: android.content.Intent) {
         intent.uriString?.let { url ->
             window.open(url, "_blank")
         }
     }
 }
 
-val LocalWebContext = staticCompositionLocalOf { WebContext() }
+val LocalWebContext = staticCompositionLocalOf<android.content.Context> { WebContext() }
 
 object WindowInsetsCompat {
     val statusBars = PaddingValues(0.dp)
+}
+
+fun androidx.compose.ui.Modifier.statusBarsPadding(): androidx.compose.ui.Modifier = this
+fun androidx.compose.ui.Modifier.navigationBarsPadding(): androidx.compose.ui.Modifier = this
+
+@Composable
+fun PullToRefreshBox(
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit,
+    modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+    content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit
+) {
+    androidx.compose.foundation.layout.Box(modifier = modifier, content = content)
 }
 
 fun formatDecimal1(value: Float): String {
@@ -208,3 +221,4 @@ fun formatDecimal1(value: Float): String {
     val decPart = kotlin.math.abs(rounded % 10)
     return "$intPart.$decPart"
 }
+

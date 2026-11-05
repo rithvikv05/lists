@@ -2,19 +2,33 @@ package com.lists.app.ui.screens
 
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CloudSync
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,25 +38,28 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import com.lists.app.currentTimeMillis
 import com.lists.app.data.model.Category
+import com.lists.app.data.model.HomeLayoutMode
 import com.lists.app.data.model.RatingScaleOption
 import com.lists.app.data.repository.AppRepository
 import com.lists.app.data.store.WebStore
 import com.lists.app.data.sync.DriveSyncManager
 import com.lists.app.data.sync.GoogleSignInAccount
 import com.lists.app.data.sync.GoogleSignInHelper
-import com.lists.app.data.sync.SyncWorker
-import com.lists.app.encodeURIComponent
+import com.lists.app.getFileReaderResult
 import com.lists.app.jsDownloadFile
 import com.lists.app.jsDownloadPackage
 import com.lists.app.jsPickAndReadPackage
-import com.lists.app.getFileReaderResult
-import com.lists.app.ui.theme.*
+import com.lists.app.statusBarsPadding
+import com.lists.app.triggerAsmrTick
+import com.lists.app.triggerStrongTick
+import com.lists.app.ui.theme.AppAccentColor
+import com.lists.app.ui.theme.AppThemeMode
 
 private fun downloadJson(filename: String, content: String) {
     try {
@@ -74,849 +91,773 @@ private fun pickAndReadJsonFile(onRead: (String) -> Unit) {
     }
 }
 
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     repository: AppRepository,
+    darkTheme: Boolean = true,
+    themeMode: AppThemeMode = AppThemeMode.AUTO,
+    onThemeChange: (Boolean) -> Unit = {},
+    onThemeModeChange: (AppThemeMode) -> Unit = {},
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var statusMessage by remember { mutableStateOf<String?>(null) }
     val scrollState = rememberScrollState()
 
-    // Rating Systems SharedPreferences
+    val uiPrefs = remember { context.getSharedPreferences("lists_ui_prefs", Context.MODE_PRIVATE) }
+    var homeLayoutMode by remember {
+        val saved = uiPrefs.getString("home_layout_mode", HomeLayoutMode.DISCRETE.name)
+        mutableStateOf(
+            try { HomeLayoutMode.valueOf(saved ?: HomeLayoutMode.DISCRETE.name) }
+            catch (_: Exception) { HomeLayoutMode.DISCRETE }
+        )
+    }
+
+    val themePrefs = remember { context.getSharedPreferences("lists_theme_prefs", Context.MODE_PRIVATE) }
+    var activeThemeMode by remember(themeMode) {
+        val saved = themePrefs.getString("app_theme_mode", themeMode.id)
+        mutableStateOf(AppThemeMode.fromId(saved))
+    }
+    var activeAccentId by remember {
+        mutableStateOf(themePrefs.getString("app_accent_color", AppAccentColor.LAVENDER.id) ?: AppAccentColor.LAVENDER.id)
+    }
+    var isAccentPaletteExpanded by remember { mutableStateOf(false) }
+
     val ratingPrefs = remember { context.getSharedPreferences("lists_rating_prefs", Context.MODE_PRIVATE) }
 
-    // Google Drive Sync state
     val signInHelper = remember { GoogleSignInHelper(context) }
     val syncManager = remember { DriveSyncManager(context) }
     val userEmail by WebStore.userEmail.collectAsState()
     val signedInAccount = userEmail?.let { GoogleSignInAccount(it, it) }
-    var lastSyncTimestamp by remember { mutableLongStateOf(syncManager.lastSyncTimestamp) }
     var autoSyncEnabled by remember { mutableStateOf(syncManager.autoSyncEnabled) }
-    var wifiOnlySync by remember { mutableStateOf(syncManager.wifiOnlySync) }
     var isSyncing by remember { mutableStateOf(false) }
-    var showRestoreDialog by remember { mutableStateOf(false) }
-    var showAdvancedSync by remember { mutableStateOf(false) }
+    var snapshots by remember { mutableStateOf(WebStore.getAvailableBackups()) }
 
-    val handleExportPackage = {
-        try {
-            val json = repository.exportDataToJson()
-            jsDownloadPackage("lists_backup.listspkg", json)
-            statusMessage = "Exported .listspkg successfully!"
-            Toast.makeText(context, "Exported .listspkg", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            statusMessage = "Failed to export package: ${e.message}"
-        }
-    }
-
-    val handleImportPackage = {
-        jsPickAndReadPackage(
-            onSuccess = { json ->
-                coroutineScope.launch {
-                    val success = repository.importDataFromJson(json)
-                    if (success) {
-                        statusMessage = "Imported .listspkg successfully!"
-                        Toast.makeText(context, "Imported successfully", Toast.LENGTH_SHORT).show()
-                    } else {
-                        statusMessage = "Invalid backup format in package"
-                    }
-                }
-            },
-            onError = { err ->
-                statusMessage = err
-            }
-        )
-    }
-
-    val handleExport = {
-        try {
-            val json = repository.exportDataToJson()
-            downloadJson("lists_backup.json", json)
-            statusMessage = "Backup exported successfully!"
-            Toast.makeText(context, "Exported successfully", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            statusMessage = "Failed to export: ${e.message}"
-        }
-    }
-
-    val handleImport = {
-        pickAndReadJsonFile { json ->
-            coroutineScope.launch {
-                val success = repository.importDataFromJson(json)
-                if (success) {
-                    statusMessage = "Backup imported successfully!"
-                    Toast.makeText(context, "Imported successfully", Toast.LENGTH_SHORT).show()
-                } else {
-                    statusMessage = "Invalid backup format"
-                }
-            }
-        }
-    }
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val isWideLayout = screenWidthDp >= 600
 
     Scaffold(
-        containerColor = PureBlack,
-        topBar = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onNavigateBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = TextWhite
-                    )
-                }
-                Text(
-                    text = "Settings",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextWhite,
-                    modifier = Modifier.padding(start = 8.dp)
-                )
-            }
-        }
-    ) { paddingValues ->
-        Column(
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+    ) { padding ->
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
-                .verticalScroll(scrollState)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+                .padding(padding),
+            contentAlignment = Alignment.TopCenter
         ) {
-            // Status banner if present
-            if (statusMessage != null) {
-                Surface(
-                    color = DarkCardElevated,
-                    shape = RoundedCornerShape(8.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                    modifier = Modifier.fillMaxWidth()
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = if (isWideLayout) 24.dp else 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(top = 16.dp, bottom = 8.dp)
+                        .height(44.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    if (!isWideLayout) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            IconButton(
+                                onClick = onNavigateBack,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Text(
+                                text = "Settings",
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = (-0.5).sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    } else {
                         Text(
-                            text = statusMessage!!,
-                            color = TextWhite,
-                            fontSize = 13.sp,
+                            text = "Settings",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.5).sp,
+                            color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f)
                         )
-                        TextButton(onClick = { statusMessage = null }) {
-                            Text("Dismiss", color = TextGrayMedium, fontSize = 12.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // SECTION 1: APPEARANCE
+                Text(
+                    text = "APPEARANCE",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shadowElevation = 0.dp,
+                    border = null,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        // Line 1: Theme
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Theme",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(3.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        onClick = {
+                                            triggerAsmrTick(context)
+                                            activeThemeMode = AppThemeMode.LIGHT
+                                            themePrefs.edit().putString("app_theme_mode", AppThemeMode.LIGHT.id).apply()
+                                            onThemeModeChange(AppThemeMode.LIGHT)
+                                            onThemeChange(false)
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (activeThemeMode == AppThemeMode.LIGHT) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                                        modifier = Modifier.size(30.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.LightMode,
+                                                contentDescription = "Light",
+                                                tint = if (activeThemeMode == AppThemeMode.LIGHT) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        onClick = {
+                                            triggerAsmrTick(context)
+                                            activeThemeMode = AppThemeMode.DARK
+                                            themePrefs.edit().putString("app_theme_mode", AppThemeMode.DARK.id).apply()
+                                            onThemeModeChange(AppThemeMode.DARK)
+                                            onThemeChange(true)
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (activeThemeMode == AppThemeMode.DARK) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                                        modifier = Modifier.size(30.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.DarkMode,
+                                                contentDescription = "Dark",
+                                                tint = if (activeThemeMode == AppThemeMode.DARK) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        onClick = {
+                                            triggerAsmrTick(context)
+                                            activeThemeMode = AppThemeMode.AUTO
+                                            themePrefs.edit().putString("app_theme_mode", AppThemeMode.AUTO.id).apply()
+                                            onThemeModeChange(AppThemeMode.AUTO)
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (activeThemeMode == AppThemeMode.AUTO) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                                        modifier = Modifier.size(30.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.BrightnessAuto,
+                                                contentDescription = "System",
+                                                tint = if (activeThemeMode == AppThemeMode.AUTO) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+
+                        // Line 2: Home Layout
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Home Layout",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(3.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val isDiscrete = homeLayoutMode == HomeLayoutMode.DISCRETE
+                                    Surface(
+                                        onClick = {
+                                            triggerAsmrTick(context)
+                                            homeLayoutMode = HomeLayoutMode.DISCRETE
+                                            uiPrefs.edit().putString("home_layout_mode", HomeLayoutMode.DISCRETE.name).apply()
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isDiscrete) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                                        modifier = Modifier.size(30.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.ViewAgenda,
+                                                contentDescription = "Discrete List",
+                                                tint = if (isDiscrete) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        }
+                                    }
+
+                                    val isBento = homeLayoutMode == HomeLayoutMode.BENTO
+                                    Surface(
+                                        onClick = {
+                                            triggerAsmrTick(context)
+                                            homeLayoutMode = HomeLayoutMode.BENTO
+                                            uiPrefs.edit().putString("home_layout_mode", HomeLayoutMode.BENTO.name).apply()
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isBento) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                                        modifier = Modifier.size(30.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.GridView,
+                                                contentDescription = "Bento Layout",
+                                                tint = if (isBento) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+
+                        // Line 3: Accent
+                        val activeAccent = AppAccentColor.fromId(activeAccentId)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Accent",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+
+                            val activeDotColor = if (activeAccent == AppAccentColor.MONOCHROME) {
+                                if (darkTheme) Color.White else Color.Black
+                            } else {
+                                activeAccent.previewColor
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(activeDotColor)
+                                    .border(
+                                        2.dp,
+                                        if (isAccentPaletteExpanded) MaterialTheme.colorScheme.onSurface else if (activeAccent == AppAccentColor.MONOCHROME && !darkTheme) Color.Black.copy(alpha = 0.25f) else Color.Transparent,
+                                        CircleShape
+                                    )
+                                    .clickable {
+                                        triggerAsmrTick(context)
+                                        isAccentPaletteExpanded = !isAccentPaletteExpanded
+                                    }
+                            )
+                        }
+
+                        AnimatedVisibility(
+                            visible = isAccentPaletteExpanded,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
+                        ) {
+                            Column(modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    AppAccentColor.entries.forEach { accent ->
+                                        val isSelected = accent.id == activeAccentId
+                                        val dotColor = if (accent == AppAccentColor.MONOCHROME) {
+                                            if (darkTheme) Color.White else Color.Black
+                                        } else {
+                                            accent.previewColor
+                                        }
+                                        val checkTint = if (accent == AppAccentColor.MONOCHROME) {
+                                            if (darkTheme) Color.Black else Color.White
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .clip(CircleShape)
+                                                .background(dotColor)
+                                                .border(
+                                                    2.dp,
+                                                    if (isSelected) MaterialTheme.colorScheme.onSurface else if (accent == AppAccentColor.MONOCHROME && !darkTheme) Color.Black.copy(alpha = 0.25f) else Color.Transparent,
+                                                    CircleShape
+                                                )
+                                                .clickable {
+                                                    triggerStrongTick(context)
+                                                    activeAccentId = accent.id
+                                                    themePrefs.edit().putString("app_accent_color", accent.id).apply()
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isSelected) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = checkTint,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-            }
 
-            // SECTION 1: Rating Systems
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // SECTION 2: SYNC & BACKUP
                 Text(
-                    text = "RATING SYSTEMS",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextGrayMedium,
-                    letterSpacing = 1.sp
+                    text = "SYNC & BACKUP",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
                 )
-                Text(
-                    text = "Choose the rating scale displayed on covers and detail pages for each category.",
-                    fontSize = 12.sp,
-                    color = TextSecondary
-                )
-                Spacer(modifier = Modifier.height(4.dp))
 
                 Surface(
-                    color = DarkCardBg,
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shadowElevation = 0.dp,
+                    border = null,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(
-                        modifier = Modifier.padding(vertical = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(0.dp)
-                    ) {
-                        CategoryRatingItem(
-                            category = Category.MOVIE,
-                            prefs = ratingPrefs
-                        )
-                        HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
-                        CategoryRatingItem(
-                            category = Category.TV_SHOW,
-                            prefs = ratingPrefs
-                        )
-                        HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
-                        CategoryRatingItem(
-                            category = Category.BOOK,
-                            prefs = ratingPrefs
-                        )
-                        HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
-                        CategoryRatingItem(
-                            category = Category.GAME,
-                            prefs = ratingPrefs
-                        )
-                    }
-                }
-            }
-
-            // SECTION 2: Google Drive Cloud Sync
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "GOOGLE DRIVE SYNC",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextGrayMedium,
-                    letterSpacing = 1.sp
-                )
-                Text(
-                    text = "Seamlessly back up and synchronize all lists and items across your Android devices and Web.",
-                    fontSize = 12.sp,
-                    color = TextSecondary
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Surface(
-                    color = DarkCardBg,
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        // Connection row
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CloudSync,
-                                contentDescription = null,
-                                tint = if (signedInAccount != null) Color(0xFF34C759) else TextGrayMedium,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = if (signedInAccount != null) "Connected" else "Google Drive",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = TextWhite
-                                )
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "Google Drive",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (signedInAccount != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                    )
+                                    if (signedInAccount != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF00E676))
+                                        )
+                                    }
+                                }
                                 Text(
                                     text = signedInAccount?.email ?: "Not connected",
-                                    fontSize = 12.sp,
-                                    color = TextSecondary
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
-                            if (signedInAccount == null) {
+
+                            if (signedInAccount != null) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Button(
+                                        onClick = {
+                                            if (isSyncing) return@Button
+                                            val account = signedInAccount ?: return@Button
+                                            coroutineScope.launch {
+                                                isSyncing = true
+                                                syncManager.syncNow(account, repository)
+                                                isSyncing = false
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            disabledContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                            disabledContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        ),
+                                        modifier = Modifier.height(34.dp)
+                                    ) {
+                                        if (isSyncing) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.2.dp,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        } else {
+                                            Text("Sync", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                signInHelper.signOut()
+                                            }
+                                        },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.LinkOff,
+                                            contentDescription = "Disconnect",
+                                            tint = MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                }
+                            } else {
                                 Button(
                                     onClick = {
                                         signInHelper.requestSignIn { success ->
                                             if (success) {
                                                 coroutineScope.launch {
-                                                    isSyncing = true
-                                                    val acct = WebStore.userEmail.value?.let { GoogleSignInAccount(it, it) }
-                                                    syncManager.syncNow(acct, repository)
-                                                    isSyncing = false
-                                                    lastSyncTimestamp = syncManager.lastSyncTimestamp
-                                                    statusMessage = "Connected & Synced with Google Drive"
+                                                    syncManager.syncNow(signInHelper.getSignedInAccount(), repository)
                                                 }
-                                            } else {
-                                                statusMessage = "Failed to connect to Google Drive"
                                             }
                                         }
                                     },
+                                    shape = RoundedCornerShape(10.dp),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = TextWhite,
-                                        contentColor = PureBlack
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                                     ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                    modifier = Modifier.height(36.dp)
                                 ) {
-                                    Text("Connect", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-                            } else {
-                                TextButton(
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            signInHelper.signOut()
-                                            statusMessage = "Disconnected from Google Drive"
-                                        }
-                                    }
-                                ) {
-                                    Text("Disconnect", color = Color(0xFFFF453A), fontSize = 12.sp)
+                                    Text("Connect", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
 
-                        if (signedInAccount != null) {
-                            HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+                            thickness = 0.5.dp
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                            // Last sync row + Sync Now button
+                        // Export & Import Actions
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Column {
-                                    Text(
-                                        text = "Last synced",
-                                        fontSize = 12.sp,
-                                        color = TextSecondary
-                                    )
-                                    Text(
-                                        text = formatLastSync(lastSyncTimestamp),
-                                        fontSize = 13.sp,
-                                        color = TextWhite,
-                                        fontWeight = FontWeight.Medium
-                                    )
+                                OutlinedButton(
+                                    onClick = {
+                                        val json = repository.exportDataToJson()
+                                        downloadJson("lists-backup-${currentTimeMillis()}.json", json)
+                                        Toast.makeText(context, "Exported JSON", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(40.dp)
+                                ) {
+                                    Icon(Icons.Default.Download, null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Export JSON", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
                                 }
 
-                                Button(
+                                OutlinedButton(
                                     onClick = {
-                                        val acct = signedInAccount ?: return@Button
-                                        coroutineScope.launch {
-                                            isSyncing = true
-                                            val res = syncManager.syncNow(acct, repository)
-                                            isSyncing = false
-                                            lastSyncTimestamp = syncManager.lastSyncTimestamp
-                                            statusMessage = if (res is DriveSyncManager.SyncResult.Success) {
-                                                "Synced with Google Drive"
-                                            } else {
-                                                "Sync failed"
+                                        pickAndReadJsonFile { json ->
+                                            coroutineScope.launch {
+                                                val success = repository.importDataFromJson(json)
+                                                if (success) {
+                                                    Toast.makeText(context, "Imported JSON", Toast.LENGTH_SHORT).show()
+                                                }
                                             }
                                         }
                                     },
-                                    enabled = !isSyncing,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = DarkCardElevated,
-                                        contentColor = TextWhite,
-                                        disabledContainerColor = DarkCardElevated.copy(alpha = 0.5f),
-                                        disabledContentColor = TextGrayMedium
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(40.dp)
                                 ) {
-                                    if (isSyncing) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(14.dp),
-                                            color = TextWhite,
-                                            strokeWidth = 2.dp
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("Syncing...", fontSize = 12.sp)
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Default.Sync,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp),
-                                            tint = TextWhite
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Sync Now", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                    }
+                                    Icon(Icons.Default.Upload, null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Import JSON", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
                                 }
                             }
 
-                            HorizontalDivider(color = DarkBorder, thickness = 0.5.dp)
-
-                            // Advanced sync options
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Row(
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val json = repository.exportDataToJson()
+                                        jsDownloadPackage("lists-archive-${currentTimeMillis()}.listspkg", json)
+                                        Toast.makeText(context, "Exported .lists package", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { showAdvancedSync = !showAdvancedSync },
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                        .weight(1f)
+                                        .height(40.dp)
                                 ) {
-                                    Text(
-                                        text = "Advanced Cloud Options",
-                                        fontSize = 12.sp,
-                                        color = TextSecondary,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Icon(
-                                        imageVector = if (showAdvancedSync) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                        contentDescription = null,
-                                        tint = TextGrayMedium,
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                    Icon(Icons.Default.Download, null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Export .lists", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
                                 }
 
-                                if (showAdvancedSync) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        OutlinedButton(
-                                            onClick = {
-                                                val acct = signedInAccount ?: return@OutlinedButton
+                                OutlinedButton(
+                                    onClick = {
+                                        jsPickAndReadPackage(
+                                            onSuccess = { json ->
                                                 coroutineScope.launch {
-                                                    isSyncing = true
-                                                    val res = syncManager.forceUpload(acct, repository)
-                                                    isSyncing = false
-                                                    lastSyncTimestamp = syncManager.lastSyncTimestamp
-                                                    statusMessage = "Uploaded to Drive"
+                                                    val success = repository.importDataFromJson(json)
+                                                    if (success) {
+                                                        Toast.makeText(context, "Imported .lists package", Toast.LENGTH_SHORT).show()
+                                                    }
                                                 }
                                             },
-                                            modifier = Modifier.weight(1f).height(42.dp),
-                                            shape = RoundedCornerShape(8.dp),
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextWhite)
-                                        ) {
-                                            Text("Force Upload", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                        }
-
-                                        OutlinedButton(
-                                            onClick = { showRestoreDialog = true },
-                                            modifier = Modifier.weight(1f).height(42.dp),
-                                            shape = RoundedCornerShape(8.dp),
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF453A))
-                                        ) {
-                                            Text("Restore Cloud", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Restore Dialog
-            if (showRestoreDialog) {
-                AlertDialog(
-                    onDismissRequest = { showRestoreDialog = false },
-                    containerColor = DarkCardElevated,
-                    title = {
-                        Text(
-                            text = "Restore from Google Drive?",
-                            color = TextWhite,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                    },
-                    text = {
-                        Text(
-                            text = "This will replace your local database with the snapshot currently stored on Google Drive. Proceed?",
-                            color = TextSecondary,
-                            fontSize = 13.sp
-                        )
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                showRestoreDialog = false
-                                val acct = signedInAccount ?: return@Button
-                                coroutineScope.launch {
-                                    isSyncing = true
-                                    val res = syncManager.forceDownload(acct, repository)
-                                    isSyncing = false
-                                    lastSyncTimestamp = syncManager.lastSyncTimestamp
-                                    statusMessage = if (res is DriveSyncManager.SyncResult.Success) {
-                                        "Restored successfully from Google Drive!"
-                                    } else {
-                                        "Restore failed"
-                                    }
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFFF453A),
-                                contentColor = TextWhite
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Restore", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showRestoreDialog = false }) {
-                            Text("Cancel", color = TextGrayMedium, fontSize = 12.sp)
-                        }
-                    }
-                )
-            }
-
-            // SECTION 3: Manual JSON Backup & Restore
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "OFFLINE BACKUP & RESTORE",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextGrayMedium,
-                    letterSpacing = 1.sp
-                )
-
-                Surface(
-                    color = DarkCardBg,
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // Row 1: Binary Archive (.listspkg)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = handleExportPackage,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = DarkCardElevated,
-                                    contentColor = TextWhite
-                                ),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "Export .listspkg",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-
-                            OutlinedButton(
-                                onClick = handleImportPackage,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = DarkCardElevated,
-                                    contentColor = TextWhite
-                                ),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "Import .listspkg",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-                        }
-
-                        // Row 2: Universal JSON Backup
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = handleExport,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = DarkCardElevated,
-                                    contentColor = TextWhite
-                                ),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "Export JSON",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-
-                            OutlinedButton(
-                                onClick = handleImport,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = DarkCardElevated,
-                                    contentColor = TextWhite
-                                ),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "Import JSON",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // SECTION 4: Data Recovery Safeguards
-            var availableBackups by remember { mutableStateOf(WebStore.getAvailableBackups()) }
-            var backupToRestore by remember { mutableStateOf<WebStore.BackupInfo?>(null) }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "DATA RECOVERY SAFEGUARDS",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextGrayMedium,
-                    letterSpacing = 1.sp
-                )
-
-                Surface(
-                    color = DarkCardBg,
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            text = "Safety snapshots are automatically captured before and after sync operations. If data is ever missing or accidentally deleted, restore any previous snapshot below with 1 click.",
-                            fontSize = 12.sp,
-                            color = TextSecondary,
-                            lineHeight = 16.sp
-                        )
-
-                        if (availableBackups.isEmpty()) {
-                            Text(
-                                text = "No automatic snapshots recorded yet. They will appear here once you perform actions or sync.",
-                                fontSize = 12.sp,
-                                color = TextGrayMedium
-                            )
-                        } else {
-                            availableBackups.forEach { bInfo ->
-                                Row(
+                                            onError = { err ->
+                                                Toast.makeText(context, "Error: $err", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(DarkCardElevated, RoundedCornerShape(8.dp))
-                                        .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
-                                        .padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .weight(1f)
+                                        .height(40.dp)
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Default.Upload, null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Import .lists", style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+                                thickness = 0.5.dp
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Local Snapshots / Rolling Backup
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Local Snapshots",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Surface(
+                                    onClick = {
+                                        triggerStrongTick(context)
+                                        WebStore.saveAutoBackup()
+                                        snapshots = WebStore.getAvailableBackups()
+                                        Toast.makeText(context, "Snapshot saved", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.padding(horizontal = 10.dp)
+                                    ) {
                                         Text(
-                                            text = bInfo.label,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = TextWhite
-                                        )
-                                        Text(
-                                            text = "${bInfo.summary} • ${formatBackupTime(bInfo.timestamp)}",
-                                            fontSize = 11.sp,
-                                            color = TextSecondary
+                                            text = "Take Snapshot",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
                                     }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
 
-                                    OutlinedButton(
-                                        onClick = { backupToRestore = bInfo },
-                                        shape = RoundedCornerShape(6.dp),
-                                        colors = ButtonDefaults.outlinedButtonColors(
-                                            containerColor = Color.Transparent,
-                                            contentColor = AccentWhite
-                                        ),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                    ) {
-                                        Text("Restore", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            if (snapshots.isEmpty()) {
+                                Text(
+                                    text = "No local backups yet. Snapshots are automatically captured before syncs or changes.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    snapshots.take(5).forEach { snap ->
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.surfaceContainer,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                                    Text(
+                                                        text = snap.label,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = snap.summary,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        triggerStrongTick(context)
+                                                        val success = WebStore.restoreFromBackup(snap.key)
+                                                        if (success) {
+                                                            Toast.makeText(context, "Restored snapshot", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    },
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                                    modifier = Modifier.height(30.dp)
+                                                ) {
+                                                    Text("Restore", style = MaterialTheme.typography.labelSmall)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            if (backupToRestore != null) {
-                val bInfo = backupToRestore!!
-                AlertDialog(
-                    onDismissRequest = { backupToRestore = null },
-                    containerColor = DarkCardElevated,
-                    title = {
-                        Text(
-                            text = "Restore ${bInfo.label}?",
-                            color = TextWhite,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                    },
-                    text = {
-                        Text(
-                            text = "This will restore your data to this snapshot (${bInfo.summary}, saved ${formatBackupTime(bInfo.timestamp)}). A safety backup of your current state will be preserved before restoring.",
-                            color = TextSecondary,
-                            fontSize = 13.sp
-                        )
-                    },
-                    confirmButton = {
-                        Button(
-                            onClick = {
-                                val success = WebStore.restoreFromBackup(bInfo.key)
-                                backupToRestore = null
-                                availableBackups = WebStore.getAvailableBackups()
-                                statusMessage = if (success) "Restored successfully from ${bInfo.label}" else "Restore failed"
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = AccentWhite,
-                                contentColor = PureBlack
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Confirm Restore", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { backupToRestore = null }) {
-                            Text("Cancel", color = TextGrayMedium, fontSize = 12.sp)
-                        }
-                    }
-                )
-            }
+                Spacer(modifier = Modifier.height(24.dp))
 
-            Spacer(modifier = Modifier.height(24.dp))
-        }
-    }
-}
-
-private fun formatBackupTime(ts: Long): String {
-    if (ts <= 0L) return "Recent"
-    val diffSec = (currentTimeMillis() - ts) / 1000
-    return when {
-        diffSec < 60 -> "Just now"
-        diffSec < 3600 -> "${diffSec / 60}m ago"
-        diffSec < 86400 -> "${diffSec / 3600}h ago"
-        else -> "${diffSec / 86400}d ago"
-    }
-}
-
-@Composable
-private fun CategoryRatingItem(
-    category: Category,
-    prefs: android.content.SharedPreferences
-) {
-    val defaultScale = RatingScaleOption.getDefault(category)
-    val savedId = prefs.getString("rating_scale_${category.id}", defaultScale.id)
-    var selectedOption by remember(savedId) {
-        mutableStateOf(RatingScaleOption.fromId(savedId, defaultScale))
-    }
-    var expanded by remember { mutableStateOf(false) }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { expanded = true }
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = category.displayName,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                color = TextWhite
-            )
-            Text(
-                text = selectedOption.displayName,
-                fontSize = 12.sp,
-                color = TextSecondary
-            )
-        }
-
-        Box {
-            TextButton(
-                onClick = { expanded = true },
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-            ) {
+                // SECTION 4: ABOUT
                 Text(
-                    text = selectedOption.shortName,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = AccentWhite
+                    text = "ABOUT",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
                 )
-            }
 
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false },
-                modifier = Modifier.background(DarkCardElevated)
-            ) {
-                RatingScaleOption.entries.forEach { option ->
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = option.displayName,
-                                fontSize = 13.sp,
-                                color = if (option == selectedOption) AccentWhite else TextWhite,
-                                fontWeight = if (option == selectedOption) FontWeight.Bold else FontWeight.Normal
-                            )
-                        },
-                        onClick = {
-                            selectedOption = option
-                            prefs.edit().putString("rating_scale_${category.id}", option.id).apply()
-                            expanded = false
-                        }
-                    )
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shadowElevation = 0.dp,
+                    border = null,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Lists",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Lists Web • Material 3",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
+
+                Spacer(modifier = Modifier.height(48.dp))
             }
         }
-    }
-}
-
-private fun formatLastSync(timestamp: Long): String {
-    if (timestamp == 0L) return "Never"
-    val diff = currentTimeMillis() - timestamp
-    val mins = diff / 60000L
-    val hours = mins / 60L
-    val days = hours / 24L
-    return when {
-        mins < 1L -> "Just now"
-        mins < 60L -> "${mins}m ago"
-        hours < 24L -> "${hours}h ago"
-        else -> "${days}d ago"
     }
 }

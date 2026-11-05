@@ -105,8 +105,12 @@ class SearchRepository {
             when (category) {
                 Category.MOVIE -> searchMovies(q, selectedYear)
                 Category.TV_SHOW -> searchTv(q, tvSubFilter, selectedYear)
+                Category.ANIME -> searchTv(q, TvSubFilter.ANIME, selectedYear)
                 Category.BOOK -> searchBooks(q, bookSubFilter, bookSearchType)
-                Category.GAME -> searchGames(q)
+                Category.MANGA -> searchBooks(q, BookSubFilter.MANGA, bookSearchType)
+                Category.COMIC -> searchBooks(q, BookSubFilter.COMICS, bookSearchType)
+                Category.GAME, Category.BOARD_GAME -> searchGames(q)
+                Category.PODCAST, Category.MUSIC -> emptyList()
             }
         } catch (e: Exception) {
             println("Search error: ${e.message}")
@@ -133,7 +137,14 @@ class SearchRepository {
                     val title = obj["Title"]?.jsonPrimitive?.content ?: return@forEach
                     val yr = obj["Year"]?.jsonPrimitive?.content ?: ""
                     var poster = obj["Poster"]?.jsonPrimitive?.content ?: ""
-                    if (poster == "N/A") poster = ""
+                    if (poster == "N/A") {
+                        poster = ""
+                    } else if (poster.isNotBlank()) {
+                        poster = poster.replace(Regex("""_SX\d+\.jpg"""), "_SX1000.jpg")
+                            .replace(Regex("""_SY\d+\.jpg"""), "_SY1000.jpg")
+                            .replace(Regex("""_SX\d+_"""), "_SX1000_")
+                            .replace(Regex("""_SY\d+_"""), "_SY1000_")
+                    }
                     val imdbId = obj["imdbID"]?.jsonPrimitive?.content ?: ""
                     results.add(
                         SearchResult(
@@ -324,7 +335,7 @@ class SearchRepository {
                     val authors = obj["author_name"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }?.joinToString(", ") ?: ""
                     val firstYear = obj["first_publish_year"]?.jsonPrimitive?.contentOrNull ?: ""
                     val coverI = obj["cover_i"]?.jsonPrimitive?.contentOrNull
-                    val coverUrl = if (coverI != null) "https://covers.openlibrary.org/b/id/$coverI-M.jpg" else ""
+                    val coverUrl = if (coverI != null) "https://covers.openlibrary.org/b/id/$coverI-L.jpg" else ""
                     val key = obj["key"]?.jsonPrimitive?.content ?: ""
 
                     results.add(
@@ -364,7 +375,7 @@ class SearchRepository {
                         val releaseYear = if (publishedDate.length >= 4) publishedDate.substring(0, 4) else ""
                         val imageLinks = info["imageLinks"]?.jsonObject
                         val rawCover = imageLinks?.get("thumbnail")?.jsonPrimitive?.content ?: ""
-                        val coverUrl = rawCover.replace("http://", "https://")
+                        val coverUrl = rawCover.replace("http://", "https://").replace("&edge=curl", "").replace("zoom=1", "zoom=2")
                         val overview = info["description"]?.jsonPrimitive?.content ?: ""
                         val pageCount = info["pageCount"]?.jsonPrimitive?.intOrNull ?: 0
                         val previewLink = info["previewLink"]?.jsonPrimitive?.content ?: ""
@@ -406,7 +417,7 @@ class SearchRepository {
                         val relationships = obj["relationships"]?.jsonArray ?: emptyList()
                         val coverRel = relationships.firstOrNull { it.jsonObject["type"]?.jsonPrimitive?.content == "cover_art" }
                         val fileName = coverRel?.jsonObject?.get("attributes")?.jsonObject?.get("fileName")?.jsonPrimitive?.content
-                        val coverUrl = if (fileName != null) "https://uploads.mangadex.org/covers/$id/$fileName.512.jpg" else ""
+                        val coverUrl = if (fileName != null) "https://uploads.mangadex.org/covers/$id/$fileName" else ""
 
                         results.add(
                             SearchResult(
@@ -444,7 +455,14 @@ class SearchRepository {
                     val title = obj["Title"]?.jsonPrimitive?.content ?: return@forEach
                     val yr = obj["Year"]?.jsonPrimitive?.content ?: ""
                     var poster = obj["Poster"]?.jsonPrimitive?.content ?: ""
-                    if (poster == "N/A") poster = ""
+                    if (poster == "N/A") {
+                        poster = ""
+                    } else if (poster.isNotBlank()) {
+                        poster = poster.replace(Regex("""_SX\d+\.jpg"""), "_SX1000.jpg")
+                            .replace(Regex("""_SY\d+\.jpg"""), "_SY1000.jpg")
+                            .replace(Regex("""_SX\d+_"""), "_SX1000_")
+                            .replace(Regex("""_SY\d+_"""), "_SY1000_")
+                    }
                     val imdbId = obj["imdbID"]?.jsonPrimitive?.content ?: ""
                     results.add(
                         SearchResult(

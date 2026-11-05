@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.lists.app"
+    namespace = "com.minimal.lists"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.lists.app"
+        applicationId = "com.minimal.lists"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -21,7 +21,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

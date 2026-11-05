@@ -8,20 +8,13 @@ import kotlinx.serialization.json.Json
 class TombstoneManager(context: Any? = null) {
     companion object {
         private const val PREFS_NAME = "lists_tombstones"
-        private const val LEGACY_PREFS_NAME = "listy_tombstones"
         private const val KEY_DELETED_LISTS = "deleted_lists_json"
         private const val KEY_DELETED_ITEMS = "deleted_items_json"
     }
 
     private val prefs = run {
         val webCtx = (context as? WebContext ?: com.lists.app.WebContext())
-        val newPrefs = webCtx.getSharedPreferences(PREFS_NAME, 0)
-        val legacyPrefs = webCtx.getSharedPreferences(LEGACY_PREFS_NAME, 0)
-        if (newPrefs.getString(KEY_DELETED_LISTS, null) == null && legacyPrefs.getString(KEY_DELETED_LISTS, null) != null) {
-            legacyPrefs.getString(KEY_DELETED_LISTS, null)?.let { newPrefs.putString(KEY_DELETED_LISTS, it) }
-            legacyPrefs.getString(KEY_DELETED_ITEMS, null)?.let { newPrefs.putString(KEY_DELETED_ITEMS, it) }
-        }
-        newPrefs
+        webCtx.getSharedPreferences(PREFS_NAME, 0)
     }
     private val json = Json { ignoreUnknownKeys = true }
 

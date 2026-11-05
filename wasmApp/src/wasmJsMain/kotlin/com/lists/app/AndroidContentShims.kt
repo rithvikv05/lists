@@ -24,8 +24,12 @@ interface SharedPreferences {
     }
 }
 
-object Context {
-    const val MODE_PRIVATE = 0
+open class Context {
+    companion object {
+        const val MODE_PRIVATE = 0
+    }
+    open fun getSharedPreferences(name: String, mode: Int = 0): SharedPreferences = throw UnsupportedOperationException()
+    open fun startActivity(intent: Intent): Unit = throw UnsupportedOperationException()
 }
 
 class Intent(val action: String? = null, val uri: Any? = null) {

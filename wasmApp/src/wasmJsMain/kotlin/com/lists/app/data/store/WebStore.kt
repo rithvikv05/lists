@@ -39,54 +39,77 @@ object WebStore {
     private val _lastSyncTime = MutableStateFlow<Long?>(null)
     val lastSyncTime: StateFlow<Long?> = _lastSyncTime.asStateFlow()
 
+    fun hasLocalChanges(): Boolean {
+        val lastMutation = localStorage["lists_last_local_mutation"]?.toLongOrNull() ?: 0L
+        val lastSync = _lastSyncTime.value ?: 0L
+        if (lastSync == 0L && (_lists.value.isNotEmpty() || _items.value.isNotEmpty())) {
+            return true
+        }
+        return lastMutation > lastSync
+    }
+
+    fun markLocalMutation() {
+        val now = currentTimeMillis()
+        localStorage["lists_last_local_mutation"] = now.toString()
+    }
+
+    fun markLocalChangesSynced() {
+        val now = _lastSyncTime.value ?: currentTimeMillis()
+        localStorage["lists_last_local_mutation"] = now.toString()
+    }
+
     fun init() {
-        val freshKey = "lists_fresh_defaults_cleared_v2"
+        val freshKey = "lists_fresh_defaults_cleared_v3"
         if (localStorage[freshKey] == null) {
             localStorage[freshKey] = "true"
-            val itemsJson = localStorage["lists_items"] ?: localStorage["listy_items"]
+            val itemsJson = localStorage["lists_items"]
             val hasItems = !itemsJson.isNullOrEmpty() && itemsJson != "[]"
             if (!hasItems) {
                 localStorage.removeItem("lists_lists")
-                localStorage.removeItem("listy_lists")
                 localStorage.removeItem("lists_items")
-                localStorage.removeItem("listy_items")
             }
         }
         loadFromStorage()
+        if (_lists.value.isEmpty()) {
+            createDefaultLists()
+        }
     }
 
     private fun loadFromStorage() {
         try {
-            val listsJson = localStorage["lists_lists"] ?: localStorage["listy_lists"]
+            val listsJson = localStorage["lists_lists"]
             if (!listsJson.isNullOrEmpty()) {
                 _lists.value = json.decodeFromString(listsJson)
             }
 
-            val itemsJson = localStorage["lists_items"] ?: localStorage["listy_items"]
+            val itemsJson = localStorage["lists_items"]
             if (!itemsJson.isNullOrEmpty()) {
                 _items.value = json.decodeFromString(itemsJson)
             }
 
-            val tombstonesJson = localStorage["lists_tombstones"] ?: localStorage["listy_tombstones"]
+            val tombstonesJson = localStorage["lists_tombstones"]
             if (!tombstonesJson.isNullOrEmpty()) {
                 _tombstones.value = json.decodeFromString(tombstonesJson)
             }
 
-            val prefsJson = localStorage["lists_rating_prefs"] ?: localStorage["listy_rating_prefs"]
+            val prefsJson = localStorage["lists_rating_prefs"]
             if (!prefsJson.isNullOrEmpty()) {
                 _ratingPrefs.value = json.decodeFromString(prefsJson)
             }
 
-            _userEmail.value = localStorage["lists_user_email"] ?: localStorage["listy_user_email"]
-            val lastSync = (localStorage["lists_last_sync"] ?: localStorage["listy_last_sync"])?.toLongOrNull()
+            _userEmail.value = localStorage["lists_user_email"]
+            val lastSync = localStorage["lists_last_sync"]?.toLongOrNull()
             _lastSyncTime.value = lastSync
         } catch (e: Exception) {
             println("Error loading from localStorage: ${e.message}")
         }
     }
 
-    private fun saveToStorage() {
+    private fun saveToStorage(isUserMutation: Boolean = true) {
         try {
+            if (isUserMutation) {
+                markLocalMutation()
+            }
             localStorage["lists_lists"] = json.encodeToString(_lists.value)
             localStorage["lists_items"] = json.encodeToString(_items.value)
             localStorage["lists_tombstones"] = json.encodeToString(_tombstones.value)
@@ -95,7 +118,6 @@ object WebStore {
                 localStorage["lists_user_email"] = _userEmail.value!!
             } else {
                 localStorage.removeItem("lists_user_email")
-                localStorage.removeItem("listy_user_email")
             }
             if (_lastSyncTime.value != null) {
                 localStorage["lists_last_sync"] = _lastSyncTime.value.toString()
@@ -108,12 +130,48 @@ object WebStore {
     private fun createDefaultLists() {
         val now = currentTimeMillis()
         val defaultLists = listOf(
-            UserList(id = 1, uuid = generateUuid(), name = "Movies to Watch", category = "MOVIE", createdAt = now, updatedAt = now),
-            UserList(id = 2, uuid = generateUuid(), name = "TV Shows", category = "TV_SHOW", createdAt = now, updatedAt = now),
-            UserList(id = 3, uuid = generateUuid(), name = "Books", category = "BOOK", createdAt = now, updatedAt = now),
-            UserList(id = 4, uuid = generateUuid(), name = "Video Games", category = "GAME", createdAt = now, updatedAt = now)
+            UserList(id = 1, uuid = generateUuid(), name = "Binge TV Shows", category = "TV_SHOW", customOrderIndex = 0, createdAt = now, updatedAt = now),
+            UserList(id = 2, uuid = generateUuid(), name = "Reading Queue", category = "BOOK", customOrderIndex = 1, createdAt = now, updatedAt = now),
+            UserList(id = 3, uuid = generateUuid(), name = "Top Anime", category = "ANIME", customOrderIndex = 2, createdAt = now, updatedAt = now),
+            UserList(id = 4, uuid = generateUuid(), name = "Manga & Comics", category = "MANGA", customOrderIndex = 3, createdAt = now, updatedAt = now),
+            UserList(id = 5, uuid = generateUuid(), name = "Indie Games", category = "GAME", customOrderIndex = 4, createdAt = now, updatedAt = now),
+            UserList(id = 6, uuid = generateUuid(), name = "Completed Masterpieces", category = "MOVIE", customOrderIndex = 5, createdAt = now, updatedAt = now)
+        )
+        val defaultItems = listOf(
+            // TV Shows (List 1) -> 3 items, 1 completed (33%) -> Style 1: Creeping Divider
+            ListItem(id = 101, listId = 1, listUuid = defaultLists[0].uuid, title = "Severance", category = "TV_SHOW", releaseYear = "2022", totalEpisodes = 9, currentEpisode = 4, marked = false, createdAt = now, updatedAt = now),
+            ListItem(id = 102, listId = 1, listUuid = defaultLists[0].uuid, title = "Succession", category = "TV_SHOW", releaseYear = "2018", totalEpisodes = 39, currentEpisode = 39, marked = true, createdAt = now, updatedAt = now),
+            ListItem(id = 103, listId = 1, listUuid = defaultLists[0].uuid, title = "Shōgun", category = "TV_SHOW", releaseYear = "2024", totalEpisodes = 10, currentEpisode = 2, marked = false, createdAt = now, updatedAt = now),
+
+            // Books (List 2) -> 4 items, 2 completed (50%) -> Style 2: Clean Circle
+            ListItem(id = 201, listId = 2, listUuid = defaultLists[1].uuid, title = "Dune", category = "BOOK", releaseYear = "1965", totalPages = 688, currentPage = 412, marked = false, createdAt = now, updatedAt = now),
+            ListItem(id = 202, listId = 2, listUuid = defaultLists[1].uuid, title = "Neuromancer", category = "BOOK", releaseYear = "1984", totalPages = 271, currentPage = 271, marked = true, createdAt = now, updatedAt = now),
+            ListItem(id = 203, listId = 2, listUuid = defaultLists[1].uuid, title = "Project Hail Mary", category = "BOOK", releaseYear = "2021", totalPages = 496, currentPage = 496, marked = true, createdAt = now, updatedAt = now),
+            ListItem(id = 204, listId = 2, listUuid = defaultLists[1].uuid, title = "Snow Crash", category = "BOOK", releaseYear = "1992", totalPages = 440, currentPage = 120, marked = false, createdAt = now, updatedAt = now),
+
+            // Anime (List 3) -> 4 items, 3 completed (75%) -> Style 3: M3 Wavy Arc
+            ListItem(id = 301, listId = 3, listUuid = defaultLists[2].uuid, title = "Frieren: Beyond Journey's End", category = "ANIME", releaseYear = "2023", totalEpisodes = 28, currentEpisode = 28, marked = true, createdAt = now, updatedAt = now),
+            ListItem(id = 302, listId = 3, listUuid = defaultLists[2].uuid, title = "Attack on Titan", category = "ANIME", releaseYear = "2013", totalEpisodes = 87, currentEpisode = 87, marked = true, createdAt = now, updatedAt = now),
+            ListItem(id = 303, listId = 3, listUuid = defaultLists[2].uuid, title = "Jujutsu Kaisen", category = "ANIME", releaseYear = "2020", totalEpisodes = 47, currentEpisode = 35, marked = false, createdAt = now, updatedAt = now),
+            ListItem(id = 304, listId = 3, listUuid = defaultLists[2].uuid, title = "Chainsaw Man", category = "ANIME", releaseYear = "2022", totalEpisodes = 12, currentEpisode = 12, marked = true, createdAt = now, updatedAt = now),
+
+            // Manga & Comics (List 4) -> 4 items, 1 completed (25%) -> Style 4: Micro Gauge
+            ListItem(id = 401, listId = 4, listUuid = defaultLists[3].uuid, title = "Berserk", category = "MANGA", releaseYear = "1989", totalEpisodes = 364, currentEpisode = 180, marked = false, createdAt = now, updatedAt = now),
+            ListItem(id = 402, listId = 4, listUuid = defaultLists[3].uuid, title = "Saga", category = "COMIC", releaseYear = "2012", totalEpisodes = 60, currentEpisode = 30, marked = false, createdAt = now, updatedAt = now),
+            ListItem(id = 403, listId = 4, listUuid = defaultLists[3].uuid, title = "Watchmen", category = "COMIC", releaseYear = "1986", totalPages = 416, currentPage = 416, marked = true, createdAt = now, updatedAt = now),
+            ListItem(id = 404, listId = 4, listUuid = defaultLists[3].uuid, title = "Monster", category = "MANGA", releaseYear = "1994", totalEpisodes = 162, currentEpisode = 40, marked = false, createdAt = now, updatedAt = now),
+
+            // Indie Games (List 5) -> 2 items, 1 completed (50%) -> Style 5: Edge Pill
+            ListItem(id = 501, listId = 5, listUuid = defaultLists[4].uuid, title = "Hades", category = "GAME", releaseYear = "2020", marked = false, createdAt = now, updatedAt = now),
+            ListItem(id = 502, listId = 5, listUuid = defaultLists[4].uuid, title = "Celeste", category = "GAME", releaseYear = "2018", marked = true, createdAt = now, updatedAt = now),
+
+            // Completed Masterpieces (List 6) -> 3 items, 3 completed (100%) -> Automatically Sorted to Bottom!
+            ListItem(id = 601, listId = 6, listUuid = defaultLists[5].uuid, title = "Interstellar", category = "MOVIE", releaseYear = "2014", marked = true, createdAt = now, updatedAt = now),
+            ListItem(id = 602, listId = 6, listUuid = defaultLists[5].uuid, title = "Blade Runner 2049", category = "MOVIE", releaseYear = "2017", marked = true, createdAt = now, updatedAt = now),
+            ListItem(id = 603, listId = 6, listUuid = defaultLists[5].uuid, title = "Spirited Away", category = "MOVIE", releaseYear = "2001", marked = true, createdAt = now, updatedAt = now)
         )
         _lists.value = defaultLists
+        _items.value = defaultItems
         saveToStorage()
     }
 
@@ -528,7 +586,6 @@ object WebStore {
             localStorage["lists_user_email"] = email
         } else {
             localStorage.removeItem("lists_user_email")
-            localStorage.removeItem("listy_user_email")
         }
     }
 

@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Listy"
+rootProject.name = "Lists"
 include(":app")
 include(":wasmApp")

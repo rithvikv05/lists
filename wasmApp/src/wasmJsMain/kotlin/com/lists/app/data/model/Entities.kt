@@ -25,7 +25,9 @@ data class UserList(
     val updatedAt: Long = currentTimeMillis(),
     val sortingOption: String = "DATE_ADDED_DESC",
     val filterOption: String = "ALL",
-    val viewMode: String = "GRID_2"
+    val viewMode: String = "GRID_2",
+    val pinned: Boolean = false,
+    val isArchived: Boolean = false
 )
 
 @Serializable
@@ -62,6 +64,7 @@ data class ListItem(
     val reviewRating: Int = 0,
     val checkedEpisodesJson: String = "",
     val episodesDataJson: String = "",
+    val loggedMinutes: Int = 0,
     val createdAt: Long = currentTimeMillis(),
     val updatedAt: Long = currentTimeMillis()
 )

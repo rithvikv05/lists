@@ -1,659 +1,937 @@
 package com.lists.app.ui.screens
 
+import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import kotlinx.coroutines.launch
-import com.lists.app.R
+import com.lists.app.PullToRefreshBox
 import com.lists.app.data.db.ListWithStats
 import com.lists.app.data.db.UserList
 import com.lists.app.data.model.Category
+import com.lists.app.data.model.HomeLayoutMode
 import com.lists.app.data.repository.AppRepository
-import com.lists.app.ui.components.CategoryIcon
+import com.lists.app.data.sync.DriveSyncManager
+import com.lists.app.data.sync.GoogleSignInHelper
+import com.lists.app.navigationBarsPadding
+import com.lists.app.statusBarsPadding
+import com.lists.app.triggerAsmrTick
+import com.lists.app.triggerStrongTick
+import com.lists.app.ui.components.*
 import com.lists.app.ui.theme.*
+
+enum class ListsSortOption(val displayName: String) {
+    RECENT("Recent"),
+    ALPHABETICAL("A – Z"),
+    ITEM_COUNT("Item Count")
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ListsScreen(
     repository: AppRepository,
     onNavigateToListDetail: (Long) -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: (() -> Unit)? = null,
+    searchTrigger: Int = 0,
+    searchRequested: Boolean = false,
+    onSearchHandled: (() -> Unit)? = null
 ) {
-    val listsWithStats by repository.allListsWithStats.collectAsState(initial = emptyList())
-    var localLists by remember { mutableStateOf<List<ListWithStats>>(emptyList()) }
-
-    var draggingListId by remember { mutableStateOf<Long?>(null) }
-    var hoverTargetListId by remember { mutableStateOf<Long?>(null) }
-    var dragOffset by remember { mutableStateOf(Offset.Zero) }
-    var fingerRootPos by remember { mutableStateOf(Offset.Zero) }
-
-    val itemBounds = remember { mutableStateMapOf<Long, Rect>() }
-
-    var showCreateDialog by remember { mutableStateOf(false) }
-    var listToEdit by remember { mutableStateOf<UserList?>(null) }
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val uiPrefs = remember { context.getSharedPreferences("lists_ui_prefs", Context.MODE_PRIVATE) }
+
+    var homeLayoutMode by remember {
+        val saved = uiPrefs.getString("home_layout_mode", HomeLayoutMode.DISCRETE.name)
+        mutableStateOf(
+            try { HomeLayoutMode.valueOf(saved ?: HomeLayoutMode.DISCRETE.name) }
+            catch (_: Exception) { HomeLayoutMode.DISCRETE }
+        )
+    }
+
+    val listsWithStats by repository.allListsWithStats.collectAsState(initial = emptyList())
+    var selectedCategoryFilter by remember { mutableStateOf<Category?>(null) }
+    var isArchiveSelected by remember { mutableStateOf(false) }
+    var sortOption by remember { mutableStateOf(ListsSortOption.RECENT) }
+    var searchQuery by remember { mutableStateOf("") }
+    var showSearchBar by remember { mutableStateOf(false) }
+
+    LaunchedEffect(searchTrigger) {
+        if (searchTrigger > 0) {
+            showSearchBar = !showSearchBar
+            if (!showSearchBar) {
+                focusManager.clearFocus()
+                searchQuery = ""
+            }
+        }
+    }
+
+    LaunchedEffect(searchRequested) {
+        if (searchRequested) {
+            showSearchBar = !showSearchBar
+            if (!showSearchBar) {
+                focusManager.clearFocus()
+                searchQuery = ""
+            }
+            onSearchHandled?.invoke()
+        }
+    }
+
+    var isRefreshing by remember { mutableStateOf(false) }
+    val syncManager = remember { DriveSyncManager(context) }
+    val signInHelper = remember { GoogleSignInHelper(context) }
+    val syncStatus by DriveSyncManager.syncStatus.collectAsState()
+    var signedInAccount by remember { mutableStateOf(signInHelper.getSignedInAccount()) }
+
+    val onPullRefresh: () -> Unit = {
+        isRefreshing = true
+        triggerStrongTick(context)
+        scope.launch {
+            val account = signInHelper.getSignedInAccount()
+            if (account != null) {
+                syncManager.syncNow(account, repository)
+            } else {
+                kotlinx.coroutines.delay(500)
+            }
+            isRefreshing = false
+        }
+    }
+
+    var showCategoryModal by remember { mutableStateOf(false) }
+    var showCreateSheet by remember { mutableStateOf(false) }
+    var showSortSheet by remember { mutableStateOf(false) }
+    var listForOptionsSheet by remember { mutableStateOf<UserList?>(null) }
+    var listToEdit by remember { mutableStateOf<UserList?>(null) }
+    var listToDelete by remember { mutableStateOf<UserList?>(null) }
+
+    val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
 
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val syncManager = remember { com.lists.app.data.sync.DriveSyncManager(context) }
-    val signInHelper = remember { com.lists.app.data.sync.GoogleSignInHelper(context) }
-    val syncStatus by com.lists.app.data.sync.DriveSyncManager.syncStatus.collectAsState()
-    val userEmail by com.lists.app.data.store.WebStore.userEmail.collectAsState()
-    val signedInAccount = userEmail?.let { com.lists.app.data.sync.GoogleSignInAccount(it, it) }
-
-    // Auto-sync on screen load or whenever user account becomes available
-    LaunchedEffect(signedInAccount) {
-        val account = signedInAccount ?: return@LaunchedEffect
-        println("Auto-sync: Account connected, triggering sync...")
-        syncManager.syncNow(account, repository)
+    LaunchedEffect(Unit) {
+        signedInAccount = signInHelper.getSignedInAccount()
+        val saved = uiPrefs.getString("home_layout_mode", HomeLayoutMode.DISCRETE.name)
+        homeLayoutMode = try { HomeLayoutMode.valueOf(saved ?: HomeLayoutMode.DISCRETE.name) }
+        catch (_: Exception) { HomeLayoutMode.DISCRETE }
     }
 
-    // Auto-sync when window gains focus (user switches back to tab)
-    LaunchedEffect(signedInAccount) {
-        val account = signedInAccount ?: return@LaunchedEffect
-        kotlinx.browser.window.onfocus = {
-            if (syncStatus !is com.lists.app.data.sync.DriveSyncManager.SyncStatus.Syncing) {
-                scope.launch {
-                    println("Auto-sync: Window focused, syncing...")
-                    syncManager.syncNow(account, repository)
-                }
-            }
-            Unit
+    val categoryCounts = remember(listsWithStats) {
+        val counts = mutableMapOf<String, Int>()
+        listsWithStats.filter { !it.list.isArchived }.forEach {
+            val cat = it.list.category.uppercase()
+            counts[cat] = (counts[cat] ?: 0) + it.itemCount
         }
+        counts
     }
 
-    // Periodic sync every 30 seconds when signed in
-    LaunchedEffect(signedInAccount) {
-        val account = signedInAccount ?: return@LaunchedEffect
-        while (true) {
-            kotlinx.coroutines.delay(30_000L)
-            if (syncStatus !is com.lists.app.data.sync.DriveSyncManager.SyncStatus.Syncing) {
-                println("Auto-sync: Periodic sync triggered")
-                syncManager.syncNow(account, repository)
+    val archivedCount = remember(listsWithStats) {
+        listsWithStats.count { it.list.isArchived }
+    }
+
+    val displayedLists = remember(listsWithStats, selectedCategoryFilter, isArchiveSelected, sortOption, searchQuery) {
+        var result = if (isArchiveSelected) {
+            listsWithStats.filter { it.list.isArchived }
+        } else {
+            val unarchived = listsWithStats.filter { !it.list.isArchived }
+            if (selectedCategoryFilter != null) {
+                unarchived.filter { it.list.category.equals(selectedCategoryFilter!!.id, ignoreCase = true) }
+            } else {
+                unarchived
             }
         }
-    }
-
-    LaunchedEffect(listsWithStats) {
-        if (draggingListId == null) {
-            localLists = listsWithStats
+        if (searchQuery.isNotBlank()) {
+            val q = searchQuery.trim().lowercase()
+            result = result.filter {
+                it.list.name.lowercase().contains(q) ||
+                it.list.category.lowercase().contains(q)
+            }
+        }
+        val isCompleted = { it: ListWithStats -> it.itemCount > 0 && it.completedCount >= it.itemCount }
+        when (sortOption) {
+            ListsSortOption.RECENT -> result.sortedWith(
+                compareByDescending<ListWithStats> { it.list.pinned }
+                    .thenBy { isCompleted(it) }
+                    .thenByDescending { it.list.updatedAt }
+            )
+            ListsSortOption.ALPHABETICAL -> result.sortedWith(
+                compareByDescending<ListWithStats> { it.list.pinned }
+                    .thenBy { isCompleted(it) }
+                    .thenBy { it.list.name.lowercase() }
+            )
+            ListsSortOption.ITEM_COUNT -> result.sortedWith(
+                compareByDescending<ListWithStats> { it.list.pinned }
+                    .thenBy { isCompleted(it) }
+                    .thenByDescending { it.itemCount }
+            )
         }
     }
+
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val isWideLayout = screenWidthDp >= 600
+    val gridColumns = if (isWideLayout) 4 else 2
 
     Scaffold(
-        containerColor = PureBlack,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "Lists",
-                        fontSize = 32.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextWhite,
-                        modifier = Modifier.padding(start = 4.dp)
-                    )
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        floatingActionButton = {
+            Surface(
+                onClick = {
+                    triggerStrongTick(context)
+                    showCreateSheet = true
                 },
-                actions = {
-                    // Sync icon button beside Settings
-                    IconButton(
-                        onClick = {
-                            val account = signInHelper.getSignedInAccount()
-                            if (account != null) {
-                                if (syncStatus !is com.lists.app.data.sync.DriveSyncManager.SyncStatus.Syncing) {
-                                    scope.launch {
-                                        triggerAsmrTick(context)
-                                        syncManager.syncNow(account, repository)
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                shadowElevation = 0.dp,
+                modifier = Modifier
+                    .padding(bottom = 24.dp)
+                    .height(40.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp)
+                        .fillMaxHeight(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "New List",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    ) { padding ->
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = onPullRefresh,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        if (showSearchBar) {
+                            focusManager.clearFocus()
+                            showSearchBar = false
+                            searchQuery = ""
+                        }
+                    },
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxSize()
+                        .padding(horizontal = if (isWideLayout) 24.dp else 16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(top = 16.dp, bottom = 8.dp)
+                            .height(44.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Lists",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            letterSpacing = (-0.5).sp
+                        )
+
+                        if (!isWideLayout) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        val account = signInHelper.getSignedInAccount()
+                                        if (account != null) {
+                                            scope.launch {
+                                                triggerAsmrTick(context)
+                                                syncManager.syncNow(account, repository)
+                                            }
+                                        } else {
+                                            onNavigateToSettings?.invoke()
+                                        }
+                                    },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        if (syncStatus is DriveSyncManager.SyncStatus.Syncing) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Default.Cloud,
+                                                contentDescription = "Sync",
+                                                tint = if (signedInAccount != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                            if (signedInAccount != null && syncManager.lastSyncTimestamp > 0) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .size(6.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color(0xFF00E676))
+                                                )
+                                            }
+                                        }
                                     }
                                 }
-                            } else {
-                                onNavigateToSettings()
+
+                                IconButton(
+                                    onClick = {
+                                        triggerAsmrTick(context)
+                                        showSearchBar = !showSearchBar
+                                        if (!showSearchBar) {
+                                            focusManager.clearFocus()
+                                            searchQuery = ""
+                                        }
+                                    },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = "Search",
+                                        tint = if (showSearchBar || searchQuery.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+
+                                if (onNavigateToSettings != null) {
+                                    IconButton(
+                                        onClick = onNavigateToSettings,
+                                        modifier = Modifier.size(40.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Settings,
+                                            contentDescription = "Settings",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
+                    }
+
+                    AnimatedVisibility(
+                        visible = showSearchBar,
+                        enter = expandVertically(animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)) + fadeIn(animationSpec = tween(durationMillis = 120)),
+                        exit = shrinkVertically(animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)) + fadeOut(animationSpec = tween(durationMillis = 90))
                     ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.size(28.dp)
+                        ListsSearchBar(
+                            query = searchQuery,
+                            onQueryChange = { searchQuery = it },
+                            placeholderText = "Search lists...",
+                            onClose = {
+                                focusManager.clearFocus()
+                                showSearchBar = false
+                                searchQuery = ""
+                            },
+                            autoFocus = true,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    triggerAsmrTick(context)
+                                    showCategoryModal = true
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            if (syncStatus is com.lists.app.data.sync.DriveSyncManager.SyncStatus.Syncing) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = TextWhite
+                            Text(
+                                text = if (isArchiveSelected) "Archived" else selectedCategoryFilter?.displayName ?: "All Categories",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (selectedCategoryFilter != null) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    triggerAsmrTick(context)
+                                    showSortSheet = true
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = "Filter",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Text(
+                                text = sortOption.displayName,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    if (displayedLists.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (searchQuery.isNotBlank()) "No matching lists found" else "No lists yet. Tap 'New List' to create one.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    } else if (homeLayoutMode == HomeLayoutMode.DISCRETE) {
+                        LazyColumn(
+                            state = listState,
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(bottom = 96.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(displayedLists, key = { it.list.id }) { listWithStats ->
+                                val cat = Category.fromId(listWithStats.list.category)
+                                DiscreteListCard(
+                                    title = listWithStats.list.name,
+                                    category = cat,
+                                    itemCount = listWithStats.itemCount,
+                                    completedCount = listWithStats.completedCount,
+                                    isPinned = listWithStats.list.pinned,
+                                    onClick = { onNavigateToListDetail(listWithStats.list.id) },
+                                    onLongClick = {
+                                        triggerStrongTick(context)
+                                        listForOptionsSheet = listWithStats.list
+                                    }
                                 )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.Sync,
-                                    contentDescription = "Sync",
-                                    tint = if (signedInAccount != null) TextWhite else TextSecondary,
-                                    modifier = Modifier.size(22.dp)
+                            }
+                        }
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(gridColumns),
+                            state = gridState,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(bottom = 96.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(displayedLists, key = { it.list.id }) { listWithStats ->
+                                val cat = Category.fromId(listWithStats.list.category)
+                                BentoCollectionCard(
+                                    title = listWithStats.list.name,
+                                    category = cat,
+                                    itemCount = listWithStats.itemCount,
+                                    completedCount = listWithStats.completedCount,
+                                    isPinned = listWithStats.list.pinned,
+                                    onClick = { onNavigateToListDetail(listWithStats.list.id) },
+                                    onLongClick = {
+                                        triggerStrongTick(context)
+                                        listForOptionsSheet = listWithStats.list
+                                    }
                                 )
-                                // Green dot indicating sync connected & completed
-                                if (signedInAccount != null && syncManager.lastSyncTimestamp > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .offset(x = 1.dp, y = (-1).dp)
-                                            .size(7.dp)
-                                            .clip(CircleShape)
-                                            .background(androidx.compose.ui.graphics.Color(0xFF34C759))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showCategoryModal) {
+        ScalableCategoryModal(
+            categories = Category.activeCategories,
+            selectedCategory = selectedCategoryFilter,
+            showAllMedia = true,
+            showArchive = true,
+            isArchiveSelected = isArchiveSelected,
+            categoryCounts = categoryCounts,
+            archivedCount = archivedCount,
+            onSelectCategory = { cat ->
+                isArchiveSelected = false
+                selectedCategoryFilter = cat
+            },
+            onSelectArchive = {
+                isArchiveSelected = true
+                selectedCategoryFilter = null
+            },
+            onDismiss = { showCategoryModal = false }
+        )
+    }
+
+    if (showSortSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSortSheet = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.surfaceContainerHighest) }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 32.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Layout View",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val isList = homeLayoutMode == HomeLayoutMode.DISCRETE
+                            Surface(
+                                onClick = {
+                                    if (!isList) {
+                                        triggerAsmrTick(context)
+                                        homeLayoutMode = HomeLayoutMode.DISCRETE
+                                        uiPrefs.edit().putString("home_layout_mode", HomeLayoutMode.DISCRETE.name).apply()
+                                    }
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isList) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ViewAgenda,
+                                        contentDescription = null,
+                                        tint = if (isList) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "List",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (isList) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isList) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                onClick = {
+                                    if (isList) {
+                                        triggerAsmrTick(context)
+                                        homeLayoutMode = HomeLayoutMode.BENTO
+                                        uiPrefs.edit().putString("home_layout_mode", HomeLayoutMode.BENTO.name).apply()
+                                    }
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (!isList) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.GridView,
+                                        contentDescription = null,
+                                        tint = if (!isList) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "Grid",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (!isList) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (!isList) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
                         }
                     }
-
-                    IconButton(onClick = onNavigateToSettings) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_settings),
-                            contentDescription = "Settings",
-                            tint = TextWhite,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = PureBlack)
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showCreateDialog = true },
-                containerColor = TextWhite,
-                contentColor = PureBlack,
-                shape = CircleShape,
-                modifier = Modifier.padding(bottom = 8.dp, end = 8.dp)
-            ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.ic_add),
-                    contentDescription = "New List",
-                    tint = PureBlack,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-        }
-    ) { padding ->
-        if (localLists.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(24.dp)
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_type_movie),
-                        contentDescription = null,
-                        tint = TextGrayMedium,
-                        modifier = Modifier.size(56.dp)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "No collections yet",
-                        color = TextWhite,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Create your first collection to start organizing your movies, shows, books, games, and comics.",
-                        color = TextSecondary,
-                        fontSize = 14.sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.widthIn(max = 400.dp)
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Button(
-                        onClick = { showCreateDialog = true },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = TextWhite,
-                            contentColor = PureBlack
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Create Collection",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
-            }
-        } else {
-            val configuration = LocalConfiguration.current
-            val screenWidthDp = configuration.screenWidthDp
 
-            val folderCols = when {
-                screenWidthDp >= 1400 -> 6
-                screenWidthDp >= 1100 -> 5
-                screenWidthDp >= 840 -> 4
-                screenWidthDp >= 560 -> 3
-                else -> 2
-            }
-            val horizontalPadding = if (screenWidthDp >= 1200) 24.dp else 16.dp
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
 
-            // Adaptive Multi-Column Grid with ID-based, 100% accurate drag-and-drop
-            LazyVerticalGrid(
-                state = gridState,
-                columns = GridCells.Fixed(folderCols),
-                contentPadding = PaddingValues(
-                    start = horizontalPadding,
-                    end = horizontalPadding,
-                    top = 8.dp,
-                    bottom = 96.dp
-                ),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-            ) {
-                items(localLists, key = { it.list.uuid.ifEmpty { "${it.list.name}_${it.list.id}" } }) { item ->
-                    val isDraggingThis = draggingListId == item.list.id
-                    val isHoverTarget = hoverTargetListId == item.list.id && draggingListId != item.list.id
+                Text(
+                    text = "Sort By",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
 
-                    Box(
-                        modifier = Modifier
-                            .onGloballyPositioned { coords ->
-                                itemBounds[item.list.id] = coords.boundsInRoot()
-                            }
-                            .zIndex(if (isDraggingThis) 20f else 1f)
-                            .graphicsLayer {
-                                if (isDraggingThis) {
-                                    translationX = dragOffset.x
-                                    translationY = dragOffset.y
-                                    scaleX = 1.05f
-                                    scaleY = 1.05f
-                                    shadowElevation = 24f
-                                }
-                            }
-                            .pointerInput(item.list.id) {
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = { localOffset ->
-                                        draggingListId = item.list.id
-                                        hoverTargetListId = item.list.id
-                                        dragOffset = Offset.Zero
-                                        val rect = itemBounds[item.list.id]
-                                        fingerRootPos = if (rect != null) rect.topLeft + localOffset else Offset.Zero
-                                    },
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        dragOffset += dragAmount
-                                        fingerRootPos += dragAmount
-
-                                        // Accurately find the folder directly beneath the finger
-                                        val target = localLists.firstOrNull { other ->
-                                            itemBounds[other.list.id]?.contains(fingerRootPos) == true
-                                        }
-                                        if (target != null) {
-                                            hoverTargetListId = target.list.id
-                                        }
-                                    },
-                                    onDragEnd = {
-                                        val fromId = draggingListId
-                                        val toId = hoverTargetListId
-                                        if (fromId != null && toId != null && fromId != toId) {
-                                            val fromIdx = localLists.indexOfFirst { it.list.id == fromId }
-                                            val toIdx = localLists.indexOfFirst { it.list.id == toId }
-                                            if (fromIdx != -1 && toIdx != -1) {
-                                                val mutable = localLists.toMutableList()
-                                                val moved = mutable.removeAt(fromIdx)
-                                                mutable.add(toIdx, moved)
-                                                localLists = mutable
-                                                scope.launch {
-                                                    repository.reorderLists(mutable.map { it.list.id })
-                                                }
-                                            }
-                                        }
-                                        draggingListId = null
-                                        hoverTargetListId = null
-                                        dragOffset = Offset.Zero
-                                    },
-                                    onDragCancel = {
-                                        draggingListId = null
-                                        hoverTargetListId = null
-                                        dragOffset = Offset.Zero
-                                    }
-                                )
-                            }
+                ListsSortOption.entries.forEach { option ->
+                    val isSelected = option == sortOption
+                    Surface(
+                        onClick = {
+                            sortOption = option
+                            showSortSheet = false
+                            triggerAsmrTick(context)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        ListsGridTile(
-                            listWithStats = item,
-                            isDragging = isDraggingThis,
-                            isHoverTarget = isHoverTarget,
-                            onClick = {
-                                if (draggingListId == null) {
-                                    onNavigateToListDetail(item.list.id)
-                                }
-                            },
-                            onEdit = { listToEdit = item.list },
-                            onDelete = {
-                                scope.launch { repository.deleteList(item.list) }
-                            }
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = option.displayName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }
         }
     }
 
-    if (showCreateDialog) {
-        CompactCreateOrEditListBottomSheet(
-            list = null,
-            onDismiss = { showCreateDialog = false },
-            onSave = { name, category ->
+    if (showCreateSheet) {
+        NewListModal(
+            onDismiss = { showCreateSheet = false },
+            onCreate = { name, category ->
+                triggerStrongTick(context)
                 scope.launch {
-                    repository.createList(name, "", category.id)
-                    showCreateDialog = false
-                    gridState.animateScrollToItem(0)
+                    repository.createList(name = name, category = category.id)
+                    showCreateSheet = false
                 }
             }
         )
     }
 
-    listToEdit?.let { list ->
-        CompactCreateOrEditListBottomSheet(
-            list = list,
-            onDismiss = { listToEdit = null },
-            onSave = { name, category ->
-                scope.launch {
-                    repository.updateList(
-                        list.copy(
-                            name = name,
-                            category = category.id
-                        )
+    listForOptionsSheet?.let { list ->
+        ModalBottomSheet(
+            onDismissRequest = { listForOptionsSheet = null },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.surfaceContainerHighest) }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .navigationBarsPadding()
+                    .padding(bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = list.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
+                    val cat = Category.fromId(list.category)
+                    Text(
+                        text = cat.displayName,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                    )
+                }
+
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+
+                Surface(
+                    onClick = {
+                        triggerAsmrTick(context)
+                        val updated = list.copy(pinned = !list.pinned)
+                        scope.launch { repository.updateList(updated) }
+                        listForOptionsSheet = null
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = null,
+                            tint = if (list.pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = if (list.pinned) "Unpin List" else "Pin to Top",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                Surface(
+                    onClick = {
+                        triggerAsmrTick(context)
+                        val updated = list.copy(isArchived = !list.isArchived)
+                        scope.launch { repository.updateList(updated) }
+                        listForOptionsSheet = null
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Archive,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = if (list.isArchived) "Unarchive List" else "Archive List",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                Surface(
+                    onClick = {
+                        triggerAsmrTick(context)
+                        listToEdit = list
+                        listForOptionsSheet = null
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "Edit List",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                Surface(
+                    onClick = {
+                        triggerStrongTick(context)
+                        listToDelete = list
+                        listForOptionsSheet = null
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.12f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "Delete List",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    listToEdit?.let { list ->
+        EditListModal(
+            initialName = list.name,
+            initialCategory = Category.fromId(list.category),
+            onDismiss = { listToEdit = null },
+            onSave = { updatedName, updatedCategory ->
+                triggerStrongTick(context)
+                scope.launch {
+                    repository.updateList(list.copy(name = updatedName, category = updatedCategory.id))
                     listToEdit = null
                 }
             }
         )
     }
-}
 
-// Exactly reproduces item_list.xml with 3-dots menu & clean hover target border
-@Composable
-fun ListsGridTile(
-    listWithStats: ListWithStats,
-    isDragging: Boolean = false,
-    isHoverTarget: Boolean = false,
-    onClick: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
-) {
-    val list = listWithStats.list
-    val category = Category.fromId(list.category)
-    var showMenu by remember { mutableStateOf(false) }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(116.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (isDragging) DarkCardElevated else DarkCardBg)
-            .border(
-                width = if (isDragging || isHoverTarget) 1.5.dp else 0.5.dp,
-                color = when {
-                    isDragging -> TextWhite
-                    isHoverTarget -> TextWhite
-                    else -> DarkBorder
-                },
-                shape = RoundedCornerShape(10.dp)
-            )
-            .clickable(onClick = onClick)
-            .padding(14.dp)
-    ) {
-        // Top Row: Category Icon (Left) & Item Count / 3-dots Menu (Right)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
-        ) {
-            CategoryIcon(
-                category = category,
-                tint = TextWhite,
-                modifier = Modifier.size(24.dp)
-            )
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
+    listToDelete?.let { targetList ->
+        AlertDialog(
+            onDismissRequest = { listToDelete = null },
+            title = {
+                Text("Delete List?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            },
+            text = {
                 Text(
-                    text = "${listWithStats.itemCount}",
-                    color = TextGrayMedium,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Normal
+                    "Are you sure you want to delete “${targetList.name}” and all of its items? This action cannot be undone.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                Box {
-                    IconButton(
-                        onClick = { showMenu = true },
-                        modifier = Modifier
-                            .size(24.dp)
-                            .padding(start = 2.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Options",
-                            tint = TextGrayDark,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = showMenu,
-                        onDismissRequest = { showMenu = false },
-                        modifier = Modifier.background(DarkCardElevated)
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Edit", color = TextWhite) },
-                            onClick = {
-                                showMenu = false
-                                onEdit()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Delete", color = TextWhite) },
-                            onClick = {
-                                showMenu = false
-                                onDelete()
-                            }
-                        )
-                    }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val toDelete = targetList
+                        listToDelete = null
+                        triggerStrongTick(context)
+                        scope.launch {
+                            repository.deleteList(toDelete)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
                 }
-            }
-        }
-
-        // Bottom: List Title
-        Text(
-            text = list.name,
-            color = TextWhite,
-            fontWeight = FontWeight.Bold,
-            fontSize = 16.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            lineHeight = 20.sp,
-            modifier = Modifier.align(Alignment.BottomStart)
+            },
+            dismissButton = {
+                TextButton(onClick = { listToDelete = null }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(16.dp)
         )
-    }
-}
-
-// Compact bottom sheet that fits completely in the initial view with ZERO scrolling
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun CompactCreateOrEditListBottomSheet(
-    list: UserList?,
-    onDismiss: () -> Unit,
-    onSave: (String, Category) -> Unit
-) {
-    var name by remember { mutableStateOf(list?.name ?: "") }
-    var selectedCategory by remember {
-        mutableStateOf(list?.let { Category.fromId(it.category) } ?: Category.MOVIE)
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = DarkCardBg,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = TextGrayDark) }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 20.dp)
-        ) {
-            Text(
-                text = if (list == null) "New List" else "Edit List",
-                color = TextWhite,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Custom input field: vertically centered, never cut off
-            androidx.compose.foundation.text.BasicTextField(
-                value = name,
-                onValueChange = { name = it },
-                singleLine = true,
-                textStyle = androidx.compose.ui.text.TextStyle(
-                    color = TextWhite,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium
-                ),
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(TextWhite),
-                decorationBox = { innerTextField ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(DarkCardElevated)
-                            .border(0.5.dp, DarkBorder, RoundedCornerShape(8.dp))
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        if (name.isEmpty()) {
-                            Text(
-                                text = "List Name",
-                                color = TextGrayDark,
-                                fontSize = 15.sp
-                            )
-                        }
-                        innerTextField()
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 4 Category pills in a single compact row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf(Category.MOVIE, Category.TV_SHOW, Category.BOOK, Category.GAME).forEach { cat ->
-                    val isSelected = selectedCategory == cat
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(36.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (isSelected) TextWhite else DarkCardElevated)
-                            .border(0.5.dp, if (isSelected) TextWhite else DarkBorder, RoundedCornerShape(6.dp))
-                            .clickable { selectedCategory = cat }
-                            .padding(horizontal = 2.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                painter = painterResource(id = cat.iconRes),
-                                contentDescription = null,
-                                tint = if (isSelected) PureBlack else TextWhite,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = when (cat) {
-                                    Category.MOVIE -> "Movie"
-                                    Category.TV_SHOW -> "TV"
-                                    Category.BOOK -> "Book"
-                                    Category.GAME -> "Game"
-                                },
-                                color = if (isSelected) PureBlack else TextWhite,
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Clean, compact Create button (Fits without scroll)
-            Button(
-                onClick = {
-                    if (name.isNotBlank()) {
-                        onSave(name.trim(), selectedCategory)
-                    }
-                },
-                enabled = name.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = TextWhite,
-                    contentColor = PureBlack,
-                    disabledContainerColor = DarkCardElevated,
-                    disabledContentColor = TextGrayDark
-                ),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(42.dp)
-            ) {
-                Text(
-                    text = if (list == null) "Create List" else "Save",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-            }
-        }
     }
 }

@@ -42,13 +42,12 @@ object GoogleDriveSync {
     private val json = Json { ignoreUnknownKeys = true }
 
     private var accessToken: String?
-        get() = localStorage["lists_access_token"] ?: localStorage["listy_access_token"]
+        get() = localStorage["lists_access_token"]
         set(value) {
             if (value != null) {
                 localStorage["lists_access_token"] = value
             } else {
                 localStorage.removeItem("lists_access_token")
-                localStorage.removeItem("listy_access_token")
             }
         }
 
@@ -469,7 +468,7 @@ object GoogleDriveSync {
             val searchResp = client.get("https://www.googleapis.com/drive/v3/files") {
                 header(HttpHeaders.Authorization, "Bearer $token")
                 parameter("spaces", "appDataFolder")
-                parameter("q", "(name='lists_sync.listspkg' or name='listy_sync.listypkg' or name='lists_sync.json' or name='listy_sync.json' or name='lists_backup.json' or name='listy_backup.json') and trashed=false")
+                parameter("q", "(name='lists_sync.listspkg' or name='lists_sync.json' or name='lists_backup.json') and trashed=false")
                 parameter("fields", "files(id,name,modifiedTime)")
                 parameter("pageSize", 10)
             }
@@ -504,7 +503,7 @@ object GoogleDriveSync {
             }
             val fileId = existingFile?.get("id")?.jsonPrimitive?.content
             val fileName = existingFile?.get("name")?.jsonPrimitive?.content ?: "lists_sync.json"
-            val isPackage = fileName.endsWith(".listspkg") || fileName.endsWith(".listypkg") || fileName.endsWith(".zip")
+            val isPackage = fileName.endsWith(".listspkg") || fileName.endsWith(".zip")
 
             if (fileId != null) {
                 val downloadUrl = "https://www.googleapis.com/drive/v3/files/$fileId?alt=media"
@@ -560,7 +559,7 @@ object GoogleDriveSync {
                     if (isPackage) {
                         println("Sync: Uploading merged data as package...")
                         val uploaded = uploadPackageToDrive(uploadUrl, token, mergedJson)
-                        if (!uploaded) {
+                        if (uploaded == null) {
                             println("Sync: Upload package failed")
                             return false
                         }

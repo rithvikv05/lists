@@ -61,7 +61,7 @@ fun jsDownloadPackage(filename: String, jsonContent: String): Unit = js("""{
 fun jsPickAndReadPackage(onSuccess: (String) -> Unit, onError: (String) -> Unit): Unit = js("""{
     var input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.listspkg,.listypkg,.zip,.json';
+    input.accept = '.listspkg,.zip,.json';
     input.onchange = function() {
         var file = input.files && input.files[0];
         if (!file) return;
@@ -140,11 +140,11 @@ fun jsFetchPackageManifest(downloadUrl: String, token: String, onSuccess: (Strin
     });
 }""")
 
-fun jsUploadPackageToDrive(uploadUrl: String, token: String, manifestJson: String, onSuccess: () -> Unit, onError: (String) -> Unit): Unit = js("""{
+fun jsUploadPackageToDrive(uploadUrl: String, token: String, manifestJson: String, onSuccess: (String) -> Unit, onError: (String) -> Unit): Unit = js("""{
     if (window.JSZip) {
         var zip = window.__lastDownloadedZip || new window.JSZip();
         zip.file("manifest.json", manifestJson);
-        zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 9 } }).then(function(blob) {
+        zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 1 } }).then(function(blob) {
             return fetch(uploadUrl, {
                 method: "PATCH",
                 headers: {
@@ -154,8 +154,15 @@ fun jsUploadPackageToDrive(uploadUrl: String, token: String, manifestJson: Strin
                 body: blob
             });
         }).then(function(res) {
-            if (res.ok) onSuccess();
-            else onError("Upload package failed: " + res.status);
+            if (res.ok) {
+                return res.json().then(function(data) {
+                    onSuccess(data && data.modifiedTime ? data.modifiedTime : "");
+                }).catch(function() {
+                    onSuccess("");
+                });
+            } else {
+                onError("Upload package failed: " + res.status);
+            }
         }).catch(function(err) {
             onError(err && err.message ? err.message : String(err));
         });
@@ -163,6 +170,10 @@ fun jsUploadPackageToDrive(uploadUrl: String, token: String, manifestJson: Strin
         onError("JSZip not available");
     }
 }""")
+
+fun jsHasLastDownloadedZip(): Boolean = js("""(function() {
+    return !!window.__lastDownloadedZip;
+})()""")
 
 suspend fun fetchPackageManifest(downloadUrl: String, token: String): String =
     kotlinx.coroutines.suspendCancellableCoroutine { cont ->
@@ -172,11 +183,12 @@ suspend fun fetchPackageManifest(downloadUrl: String, token: String): String =
         )
     }
 
-suspend fun uploadPackageToDrive(uploadUrl: String, token: String, manifestJson: String): Boolean =
+suspend fun uploadPackageToDrive(uploadUrl: String, token: String, manifestJson: String): String? =
     kotlinx.coroutines.suspendCancellableCoroutine { cont ->
         jsUploadPackageToDrive(uploadUrl, token, manifestJson,
-            onSuccess = { if (cont.isActive) cont.resumeWith(Result.success(true)) },
-            onError = { if (cont.isActive) cont.resumeWith(Result.success(false)) }
+            onSuccess = { if (cont.isActive) cont.resumeWith(Result.success(it)) },
+            onError = { if (cont.isActive) cont.resumeWith(Result.success(null)) }
         )
     }
+
 
