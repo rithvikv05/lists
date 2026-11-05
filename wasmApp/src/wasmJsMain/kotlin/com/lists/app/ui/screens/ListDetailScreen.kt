@@ -136,7 +136,6 @@ fun ListDetailScreen(
     var showSortSheet by remember { mutableStateOf(false) }
     var showOptionsSheet by remember { mutableStateOf(false) }
     var showEditListModal by remember { mutableStateOf(false) }
-    var itemForOptions by remember { mutableStateOf<ListItem?>(null) }
     var itemToEdit by remember { mutableStateOf<ListItem?>(null) }
     var itemToDelete by remember { mutableStateOf<ListItem?>(null) }
     var selectedItemIds by remember { mutableStateOf(emptySet<Long>()) }
@@ -286,6 +285,24 @@ fun ListDetailScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
+                            val selectedItems = filteredItems.filter { selectedItemIds.contains(it.id) }
+                            val anyUnmarked = selectedItems.any { !it.marked }
+                            val anyUnpinned = selectedItems.any { !it.pinned }
+
+                            // Edit Item (visible when exactly 1 item is selected)
+                            if (selectedItemIds.size == 1) {
+                                IconButton(onClick = {
+                                    triggerStrongTick(context)
+                                    val item = selectedItems.firstOrNull()
+                                    if (item != null) {
+                                        itemToEdit = item
+                                        selectedItemIds = emptySet()
+                                    }
+                                }) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Edit Item", tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+
                             // Select All
                             IconButton(onClick = {
                                 triggerAsmrTick(context)
@@ -295,8 +312,6 @@ fun ListDetailScreen(
                             }
 
                             // Bulk Mark / Unmark
-                            val selectedItems = filteredItems.filter { selectedItemIds.contains(it.id) }
-                            val anyUnmarked = selectedItems.any { !it.marked }
                             IconButton(onClick = {
                                 triggerStrongTick(context)
                                 scope.launch {
@@ -312,7 +327,6 @@ fun ListDetailScreen(
                             }
 
                             // Bulk Pin / Unpin
-                            val anyUnpinned = selectedItems.any { !it.pinned }
                             IconButton(onClick = {
                                 triggerStrongTick(context)
                                 scope.launch {
@@ -322,8 +336,8 @@ fun ListDetailScreen(
                             }) {
                                 Icon(
                                     imageVector = Icons.Default.PushPin,
-                                    contentDescription = "Pin/Unpin",
-                                    tint = MaterialTheme.colorScheme.primary
+                                    contentDescription = if (anyUnpinned) "Pin" else "Unpin",
+                                    tint = if (anyUnpinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                                 )
                             }
 
@@ -476,7 +490,9 @@ fun ListDetailScreen(
                 ) {
                     // Left: Official Material 3 Segmented Button Row (All | Done | Remaining)
                     SingleChoiceSegmentedButtonRow(
-                        modifier = Modifier.height(34.dp)
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .height(34.dp)
                     ) {
                         ItemStatusFilter.entries.forEachIndexed { index, filter ->
                             val isSelected = statusFilter == filter
@@ -504,12 +520,15 @@ fun ListDetailScreen(
                                         text = filter.displayName,
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
                                     )
                                 }
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -1175,137 +1194,7 @@ fun ListDetailScreen(
         }
     }
 
-    itemForOptions?.let { selectedItem ->
-        val itemCat = Category.fromId(selectedItem.category)
-        val markLabel = when (itemCat) {
-            Category.MOVIE, Category.TV_SHOW, Category.ANIME -> if (selectedItem.marked) "Mark as Unwatched" else "Mark as Watched"
-            Category.BOOK, Category.COMIC, Category.MANGA -> if (selectedItem.marked) "Mark as Unread" else "Mark as Read"
-            Category.GAME, Category.BOARD_GAME -> if (selectedItem.marked) "Mark as Unplayed" else "Mark as Played"
-            else -> if (selectedItem.marked) "Mark as Incomplete" else "Mark as Completed"
-        }
 
-        ModalBottomSheet(
-            onDismissRequest = { itemForOptions = null },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.surfaceContainerHighest) }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = selectedItem.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
-
-                Surface(
-                    onClick = {
-                        val current = selectedItem
-                        itemForOptions = null
-                        triggerStrongTick(context)
-                        scope.launch {
-                            repository.toggleItemMarked(current)
-                        }
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (selectedItem.marked) Icons.Default.CheckCircle else Icons.Default.Check,
-                            contentDescription = null,
-                            tint = if (selectedItem.marked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(markLabel, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-
-                Surface(
-                    onClick = {
-                        val current = selectedItem
-                        itemForOptions = null
-                        triggerAsmrTick(context)
-                        scope.launch {
-                            repository.toggleItemPinned(current)
-                        }
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PushPin,
-                            contentDescription = null,
-                            tint = if (selectedItem.pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = if (selectedItem.pinned) "Unpin from Top" else "Pin to Top",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-
-                Surface(
-                    onClick = {
-                        val current = selectedItem
-                        itemForOptions = null
-                        itemToEdit = current
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(Icons.Default.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Edit Item", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-
-                Surface(
-                    onClick = {
-                        val current = selectedItem
-                        itemForOptions = null
-                        itemToDelete = current
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.12f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                        Text("Delete Item", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
-                    }
-                }
-            }
-        }
-    }
 
     itemToEdit?.let { targetItem ->
         val targetCat = targetItem.category.takeIf { it.isNotBlank() }?.let { Category.fromId(it) } ?: category

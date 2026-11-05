@@ -9,6 +9,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.outlined.List
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Search
@@ -29,6 +30,7 @@ import com.lists.app.LocalWebContext
 import com.lists.app.WebContext
 import com.lists.app.data.repository.AppRepository
 import com.lists.app.data.store.WebStore
+import com.lists.app.data.sync.DriveSyncManager
 import com.lists.app.data.sync.GoogleDriveSync
 import com.lists.app.triggerAsmrTick
 import com.lists.app.ui.screens.*
@@ -111,6 +113,8 @@ fun main() {
                     var searchTriggerDetail by remember { mutableStateOf(0) }
 
                     val syncing by WebStore.syncing.collectAsState()
+                    val syncStatus by DriveSyncManager.syncStatus.collectAsState()
+                    val isSyncing = syncing || syncStatus is DriveSyncManager.SyncStatus.Syncing
                     val userEmail by WebStore.userEmail.collectAsState()
                     val lastSyncTime by WebStore.lastSyncTime.collectAsState()
 
@@ -217,7 +221,7 @@ fun main() {
                                                 }
                                             },
                                             icon = {
-                                                if (syncing) {
+                                                if (isSyncing) {
                                                     CircularProgressIndicator(
                                                         modifier = Modifier.size(18.dp),
                                                         strokeWidth = 2.dp,
@@ -225,12 +229,14 @@ fun main() {
                                                     )
                                                 } else {
                                                     val isConnected = userEmail != null
-                                                    val isSynced = (lastSyncTime ?: 0L) > 0
+                                                    val isSynced = (lastSyncTime ?: 0L) > 0 || (GoogleDriveSync.getLastSyncTime() ?: 0L) > 0
                                                     Box(contentAlignment = Alignment.Center) {
                                                         Icon(
-                                                            imageVector = Icons.Default.Cloud,
+                                                            imageVector = if (!darkTheme) Icons.Outlined.Cloud else Icons.Default.Cloud,
                                                             contentDescription = "Sync",
-                                                            tint = if (isConnected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant
+                                                            tint = if (isConnected) {
+                                                                if (!darkTheme) MaterialTheme.colorScheme.onSurfaceVariant else Color.White
+                                                            } else MaterialTheme.colorScheme.outlineVariant
                                                         )
                                                         if (isConnected && isSynced) {
                                                             Box(

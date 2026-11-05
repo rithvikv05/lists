@@ -73,7 +73,29 @@ fun formatMinutes(minutes: Int): String {
     return if (h > 0) "${h}h ${m}m" else "${m}m"
 }
 
-fun isEpisodeLocked(airdate: String): Boolean = false
+fun jsParseAirdate(dateStr: String): Double = js("Date.parse(dateStr)")
+fun jsDateNow(): Double = js("Date.now()")
+
+fun isEpisodeLocked(airdate: String): Boolean {
+    if (airdate.isBlank()) return false
+    if (airdate.contains("Upcoming", ignoreCase = true)) return true
+    val cleanDate = airdate.trim()
+    try {
+        val parsedMs = jsParseAirdate(cleanDate)
+        if (!parsedMs.isNaN() && parsedMs > 0.0) {
+            val nowMs = jsDateNow()
+            return parsedMs > nowMs
+        }
+    } catch (_: Exception) {}
+    try {
+        val yearMatch = Regex("\\b(20\\d{2})\\b").find(cleanDate)?.value?.toIntOrNull()
+        if (yearMatch != null) {
+            val nowYear = 2026
+            if (yearMatch > nowYear) return true
+        }
+    } catch (_: Exception) {}
+    return false
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

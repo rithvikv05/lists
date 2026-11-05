@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -27,6 +28,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
@@ -148,7 +151,6 @@ fun ListsScreen(
     var showCategoryModal by remember { mutableStateOf(false) }
     var showCreateSheet by remember { mutableStateOf(false) }
     var showSortSheet by remember { mutableStateOf(false) }
-    var listForOptionsSheet by remember { mutableStateOf<UserList?>(null) }
     var listToEdit by remember { mutableStateOf<UserList?>(null) }
     var listToDelete by remember { mutableStateOf<UserList?>(null) }
     var selectedListIds by remember { mutableStateOf(emptySet<Long>()) }
@@ -280,16 +282,18 @@ fun ListsScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
+                    .then(
                         if (showSearchBar) {
-                            focusManager.clearFocus()
-                            showSearchBar = false
-                            searchQuery = ""
-                        }
-                    },
+                            Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                focusManager.clearFocus()
+                                showSearchBar = false
+                                searchQuery = ""
+                            }
+                        } else Modifier
+                    ),
                 contentAlignment = Alignment.TopCenter
             ) {
                 Column(
@@ -300,6 +304,10 @@ fun ListsScreen(
                 ) {
                 // Top Header Row matching Stitch Screen #11 & #23 with zero extra black gap
                 if (selectedListIds.isNotEmpty()) {
+                    val selectedLists = displayedLists.filter { selectedListIds.contains(it.list.id) }.map { it.list }
+                    val anyUnpinned = selectedLists.any { !it.pinned }
+                    val anyUnarchived = selectedLists.any { !it.isArchived }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -329,6 +337,20 @@ fun ListsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
+                            // Edit List (visible when exactly 1 list is selected)
+                            if (selectedListIds.size == 1) {
+                                IconButton(onClick = {
+                                    triggerStrongTick(context)
+                                    val list = selectedLists.firstOrNull()
+                                    if (list != null) {
+                                        listToEdit = list
+                                        selectedListIds = emptySet()
+                                    }
+                                }) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Edit List", tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+
                             IconButton(onClick = {
                                 triggerAsmrTick(context)
                                 selectedListIds = if (selectedListIds.size == displayedLists.size) emptySet() else displayedLists.map { it.list.id }.toSet()
@@ -338,26 +360,30 @@ fun ListsScreen(
 
                             IconButton(onClick = {
                                 triggerStrongTick(context)
-                                val selectedLists = displayedLists.filter { selectedListIds.contains(it.list.id) }.map { it.list }
-                                val anyUnpinned = selectedLists.any { !it.pinned }
                                 scope.launch {
                                     repository.setListsPinned(selectedLists, anyUnpinned)
                                     selectedListIds = emptySet()
                                 }
                             }) {
-                                Icon(Icons.Default.PushPin, contentDescription = "Pin/Unpin", tint = MaterialTheme.colorScheme.primary)
+                                Icon(
+                                    imageVector = Icons.Default.PushPin,
+                                    contentDescription = if (anyUnpinned) "Pin" else "Unpin",
+                                    tint = if (anyUnpinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                )
                             }
 
                             IconButton(onClick = {
                                 triggerStrongTick(context)
-                                val selectedLists = displayedLists.filter { selectedListIds.contains(it.list.id) }.map { it.list }
-                                val anyUnarchived = selectedLists.any { !it.isArchived }
                                 scope.launch {
                                     repository.setListsArchived(selectedLists, anyUnarchived)
                                     selectedListIds = emptySet()
                                 }
                             }) {
-                                Icon(Icons.Default.Archive, contentDescription = "Archive", tint = MaterialTheme.colorScheme.primary)
+                                Icon(
+                                    imageVector = if (isArchiveSelected) Icons.Default.Unarchive else Icons.Default.Archive,
+                                    contentDescription = if (isArchiveSelected) "Unarchive" else "Archive",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
                             }
 
                             IconButton(onClick = {
@@ -416,9 +442,11 @@ fun ListsScreen(
                                             )
                                         } else {
                                             Icon(
-                                                imageVector = Icons.Default.Cloud,
+                                                imageVector = if (!isSystemInDarkTheme()) Icons.Outlined.Cloud else Icons.Default.Cloud,
                                                 contentDescription = "Sync",
-                                                tint = if (signedInAccount != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant,
+                                                tint = if (signedInAccount != null) {
+                                                    if (!isSystemInDarkTheme()) MaterialTheme.colorScheme.onSurfaceVariant else Color.White
+                                                } else MaterialTheme.colorScheme.outlineVariant,
                                                 modifier = Modifier.size(22.dp)
                                             )
                                             if (signedInAccount != null && syncManager.lastSyncTimestamp > 0) {
@@ -583,7 +611,9 @@ fun ListsScreen(
                         state = listState,
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 96.dp),
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
                     ) {
                         items(displayedLists, key = { it.list.id }) { listWithStats ->
                             val cat = Category.fromId(listWithStats.list.category)
@@ -620,7 +650,9 @@ fun ListsScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 96.dp),
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
                     ) {
                         items(displayedLists, key = { it.list.id }) { listWithStats ->
                             val cat = Category.fromId(listWithStats.list.category)
@@ -843,181 +875,7 @@ fun ListsScreen(
         )
     }
 
-    // List Options Bottom Sheet (Pin, Archive, Edit, Delete on Long Press)
-    listForOptionsSheet?.let { list ->
-        ModalBottomSheet(
-            onDismissRequest = { listForOptionsSheet = null },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.surfaceContainerHighest) }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .navigationBarsPadding()
-                    .padding(bottom = 28.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Header: List Title & Category dot
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = list.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    val cat = Category.fromId(list.category)
-                    Text(
-                        text = cat.displayName,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                    )
-                }
 
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
-
-                // Option 1: Pin / Unpin
-                Surface(
-                    onClick = {
-                        triggerAsmrTick(context)
-                        val updated = list.copy(pinned = !list.pinned)
-                        scope.launch { repository.updateList(updated) }
-                        listForOptionsSheet = null
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PushPin,
-                            contentDescription = null,
-                            tint = if (list.pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = if (list.pinned) "Unpin List" else "Pin to Top",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-
-                // Option 2: Archive / Unarchive
-                Surface(
-                    onClick = {
-                        triggerAsmrTick(context)
-                        val updated = list.copy(isArchived = !list.isArchived)
-                        scope.launch { repository.updateList(updated) }
-                        listForOptionsSheet = null
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Archive,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = if (list.isArchived) "Unarchive List" else "Archive List",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-
-                // Option 3: Edit
-                Surface(
-                    onClick = {
-                        triggerAsmrTick(context)
-                        listToEdit = list
-                        listForOptionsSheet = null
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = "Edit List",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-
-                // Option 5: Delete
-                Surface(
-                    onClick = {
-                        triggerStrongTick(context)
-                        listToDelete = list
-                        listForOptionsSheet = null
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.12f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = "Delete List",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
-            }
-        }
-    }
 
     // Edit List Modal
     listToEdit?.let { list ->

@@ -432,10 +432,16 @@ fun DiscreteListCard(
     onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val isLight = MaterialTheme.colorScheme.surface.luminance() > 0.5f
+    val cardBg = if (selected) {
+        if (isLight) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+        else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+    } else MaterialTheme.colorScheme.surfaceContainerLow
+
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerLow,
-        shadowElevation = 1.5.dp,
+        color = cardBg,
+        shadowElevation = if (selected) 0.dp else 1.5.dp,
         border = if (selected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = modifier
             .fillMaxWidth()
@@ -563,10 +569,16 @@ fun BentoCollectionCard(
     onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val isLight = MaterialTheme.colorScheme.surface.luminance() > 0.5f
+    val cardBg = if (selected) {
+        if (isLight) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+        else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+    } else MaterialTheme.colorScheme.surfaceContainerLow
+
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerLow,
-        shadowElevation = 1.5.dp,
+        color = cardBg,
+        shadowElevation = if (selected) 0.dp else 1.5.dp,
         border = if (selected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = modifier
             .fillMaxWidth()
@@ -1474,31 +1486,55 @@ fun GridMediaCard(
     onToggleComplete: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    Column(
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color.Transparent,
         modifier = modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
     ) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(2f / 3f)
-                .clip(RoundedCornerShape(12.dp))
-                .border(
-                    if (selected) 2.dp else 0.5.dp,
-                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                    RoundedCornerShape(12.dp)
-                )
+                .padding(4.dp)
         ) {
-            CoverImage(
-                url = item.coverUrl,
-                category = category,
-                uuid = item.uuid,
-                modifier = Modifier.fillMaxSize()
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(2f / 3f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(
+                        if (selected) 2.dp else 0.5.dp,
+                        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                        RoundedCornerShape(12.dp)
+                    )
+            ) {
+                CoverImage(
+                    url = item.coverUrl,
+                    category = category,
+                    uuid = item.uuid,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // Accent gradient scrim overlay when selected
+                if (selected) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.40f),
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                    )
+                                )
+                            )
+                    )
+                }
 
             // Multi-select check badge on top-end
             if (selected) {
@@ -1618,6 +1654,7 @@ fun GridMediaCard(
                 )
         )
     }
+}
 }
 
 /**
