@@ -561,41 +561,6 @@ class SearchRepository {
             }
         } catch (_: Throwable) {}
 
-        // 3. Fallback: OMDB Movie Search
-        try {
-            val omdbUrl = "https://www.omdbapi.com/?s=$term$yearParam&type=movie&apikey=trilogy"
-            val resp = client.get(omdbUrl).bodyAsText()
-            val root = json.parseToJsonElement(resp).jsonObject
-            if (root["Response"]?.jsonPrimitive?.content == "True") {
-                val arr = root["Search"]?.jsonArray
-                arr?.forEach { elem ->
-                    val obj = elem.jsonObject
-                    val title = obj["Title"]?.jsonPrimitive?.content ?: return@forEach
-                    val yr = obj["Year"]?.jsonPrimitive?.content ?: ""
-                    var poster = obj["Poster"]?.jsonPrimitive?.content ?: ""
-                    if (poster == "N/A") {
-                        poster = ""
-                    } else if (poster.isNotBlank()) {
-                        poster = poster.replace(Regex("""_SX\d+\.jpg"""), "_SX1200.jpg")
-                            .replace(Regex("""_SY\d+\.jpg"""), "_SY1200.jpg")
-                    }
-                    val imdbId = obj["imdbID"]?.jsonPrimitive?.content ?: ""
-                    results.add(
-                        SearchResult(
-                            title = title,
-                            releaseYear = yr,
-                            releaseDate = yr,
-                            coverUrl = poster,
-                            category = Category.MOVIE,
-                            externalUrl = if (imdbId.isNotEmpty()) "https://www.imdb.com/title/$imdbId" else ""
-                        )
-                    )
-                }
-            }
-        } catch (e: Throwable) {
-            println("OMDB movies error: ${e.message}")
-        }
-
         return results
     }
 
@@ -676,36 +641,6 @@ class SearchRepository {
                                 category = Category.TV_SHOW,
                                 externalUrl = extUrl,
                                 totalEpisodes = episodesCount
-                            )
-                        )
-                    }
-                }
-            } catch (_: Throwable) {}
-        }
-
-        // 3. OMDB Series Fallback
-        if (results.isEmpty() && (filter == TvSubFilter.ALL || filter == TvSubFilter.TV_SHOWS)) {
-            try {
-                val omdbUrl = "https://www.omdbapi.com/?s=$term&type=series&apikey=trilogy"
-                val resp = client.get(omdbUrl).bodyAsText()
-                val root = json.parseToJsonElement(resp).jsonObject
-                if (root["Response"]?.jsonPrimitive?.content == "True") {
-                    val arr = root["Search"]?.jsonArray
-                    arr?.forEach { elem ->
-                        val obj = elem.jsonObject
-                        val title = obj["Title"]?.jsonPrimitive?.content ?: return@forEach
-                        val yr = obj["Year"]?.jsonPrimitive?.content ?: ""
-                        var poster = obj["Poster"]?.jsonPrimitive?.content ?: ""
-                        if (poster == "N/A") poster = ""
-                        val imdbId = obj["imdbID"]?.jsonPrimitive?.content ?: ""
-                        results.add(
-                            SearchResult(
-                                title = title,
-                                releaseYear = yr,
-                                releaseDate = yr,
-                                coverUrl = poster,
-                                category = Category.TV_SHOW,
-                                externalUrl = if (imdbId.isNotEmpty()) "https://www.imdb.com/title/$imdbId" else ""
                             )
                         )
                     }
@@ -971,42 +906,7 @@ class SearchRepository {
             }
         } catch (_: Throwable) {}
 
-        // 2. OMDB Video Game Search
-        try {
-            val omdbUrl = "https://www.omdbapi.com/?s=$term&type=game&apikey=trilogy"
-            val resp = client.get(omdbUrl).bodyAsText()
-            val root = json.parseToJsonElement(resp).jsonObject
-            if (root["Response"]?.jsonPrimitive?.content == "True") {
-                val arr = root["Search"]?.jsonArray
-                arr?.forEach { elem ->
-                    val obj = elem.jsonObject
-                    val title = obj["Title"]?.jsonPrimitive?.content ?: return@forEach
-                    val yr = obj["Year"]?.jsonPrimitive?.content ?: ""
-                    var poster = obj["Poster"]?.jsonPrimitive?.content ?: ""
-                    if (poster == "N/A") {
-                        poster = ""
-                    } else if (poster.isNotBlank()) {
-                        poster = poster.replace(Regex("""_SX\d+\.jpg"""), "_SX1200.jpg")
-                            .replace(Regex("""_SY\d+\.jpg"""), "_SY1200.jpg")
-                    }
-                    val imdbId = obj["imdbID"]?.jsonPrimitive?.content ?: ""
-                    results.add(
-                        SearchResult(
-                            title = title,
-                            releaseYear = yr,
-                            releaseDate = yr,
-                            coverUrl = poster,
-                            category = Category.GAME,
-                            externalUrl = if (imdbId.isNotEmpty()) "https://www.imdb.com/title/$imdbId" else ""
-                        )
-                    )
-                }
-            }
-        } catch (e: Throwable) {
-            println("OMDB games error: ${e.message}")
-        }
-
-        // 3. Wikipedia fallback for video games
+        // 2. Wikipedia fallback for video games
         if (results.isEmpty()) {
             val wiki = searchWikipedia(query, Category.GAME)
             results.addAll(wiki)

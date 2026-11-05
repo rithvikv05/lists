@@ -793,26 +793,26 @@ class SearchRepository {
             val imdbMatch = Regex("imdb\\.com/title/(tt\\d+)", RegexOption.IGNORE_CASE).find(trimmed)
             if (imdbMatch != null) {
                 val imdbId = imdbMatch.groupValues[1]
-                val url = "https://www.omdbapi.com/?i=$imdbId&apikey=trilogy"
-                val req = Request.Builder().url(url).header("User-Agent", "Mozilla/5.0").build()
+                val url = "https://v3.sg.media-imdb.com/suggestion/t/$imdbId.json"
+                val req = Request.Builder().url(url).header("User-Agent", "ListsApp/1.0").build()
                 client.newCall(req).execute().use { response ->
                     if (response.isSuccessful) {
                         val json = JSONObject(response.body?.string() ?: "")
-                        if (json.optString("Response") == "True") {
-                            val title = json.optString("Title")
-                            val year = json.optString("Year")
-                            var poster = json.optString("Poster")
-                            if (poster == "N/A") poster = ""
-                            val plot = json.optString("Plot")
-                            val rating = json.optDouble("imdbRating", 0.0).toFloat()
-                            val type = json.optString("Type")
-                            val cat = if (type.equals("series", ignoreCase = true)) Category.TV_SHOW else Category.MOVIE
+                        val dArr = json.optJSONArray("d")
+                        if (dArr != null && dArr.length() > 0) {
+                            val first = dArr.getJSONObject(0)
+                            val title = first.optString("l")
+                            val year = if (first.has("y")) first.optInt("y").toString() else ""
+                            val imgObj = first.optJSONObject("i")
+                            val poster = imgObj?.optString("imageUrl") ?: ""
+                            val qid = first.optString("qid")
+                            val cat = if (qid.contains("tv", ignoreCase = true)) Category.TV_SHOW else Category.MOVIE
                             return@withContext SearchResult(
                                 title = title,
                                 releaseYear = year,
                                 coverUrl = poster,
-                                overview = plot,
-                                rating = rating,
+                                overview = first.optString("s"),
+                                rating = 0f,
                                 category = cat,
                                 externalUrl = "https://www.imdb.com/title/$imdbId"
                             )
@@ -1384,7 +1384,7 @@ class SearchRepository {
     }
 
     // -------------------------------------------------------------
-    // MOVIES: iTunes Fast Search + IMDb Suggestions + JustWatch + OMDb Fallback
+    // MOVIES: iTunes Fast Search + IMDb Suggestions + JustWatch (Keyless Open Fallback)
     // -------------------------------------------------------------
     private suspend fun searchMovies(query: String, yearFilter: String? = null, langFilter: String? = null): List<SearchResult> = coroutineScope {
         val encoded = URLEncoder.encode(query, "UTF-8")
@@ -1395,51 +1395,7 @@ class SearchRepository {
         val imdbDeferred = async { withTimeoutOrNull(2500) { searchImdbMovies(query, yearFilter, langFilter) } ?: emptyList() }
         val justWatchDeferred = async { withTimeoutOrNull(2500) { searchJustWatch(query, "MOVIE", Category.MOVIE, langFilter) } ?: emptyList() }
 
-        // 2. Fallback provider: OMDb API
-        val omdbDeferred = async {
-            withTimeoutOrNull(2500) {
-                val results = mutableListOf<SearchResult>()
-                try {
-                    val url = "https://www.omdbapi.com/?s=$encoded$yearParam&type=movie&page=1&apikey=trilogy"
-                    val req = Request.Builder()
-                        .url(url)
-                        .header("User-Agent", "ListsApp/1.0")
-                        .build()
-
-                    client.newCall(req).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val body = response.body?.string() ?: ""
-                            val json = JSONObject(body)
-                            if (json.optString("Response") == "True") {
-                                val searchArr = json.optJSONArray("Search") ?: JSONArray()
-                                for (i in 0 until searchArr.length()) {
-                                    val item = searchArr.getJSONObject(i)
-                                    val title = item.optString("Title")
-                                    val year = item.optString("Year")
-                                    var poster = item.optString("Poster")
-                                    if (poster == "N/A") poster = ""
-                                    val imdbId = item.optString("imdbID")
-
-                                    results.add(
-                                        SearchResult(
-                                            title = cleanCanonicalTitle(title),
-                                            releaseYear = year,
-                                            releaseDate = year,
-                                            coverUrl = poster,
-                                            category = Category.MOVIE,
-                                            externalUrl = if (imdbId.isNotEmpty()) "https://www.imdb.com/title/$imdbId" else ""
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-                results
-            } ?: emptyList()
-        }
-
-        val allResults = itunesDeferred.await() + imdbDeferred.await() + justWatchDeferred.await() + omdbDeferred.await()
+        val allResults = itunesDeferred.await() + imdbDeferred.await() + justWatchDeferred.await()
         if (allResults.size < 6) {
             val wiki = withTimeoutOrNull(1800) { searchWikipedia(query, Category.MOVIE) } ?: emptyList()
             allResults + wiki
@@ -1461,8 +1417,7 @@ class SearchRepository {
             TvSubFilter.TV_SHOWS -> listOf(
                 async { withTimeoutOrNull(2500) { searchTvMaze(query, yearFilter) } ?: emptyList() },
                 async { withTimeoutOrNull(2500) { searchJustWatch(query, "SHOW", Category.TV_SHOW, langFilter) } ?: emptyList() },
-                async { withTimeoutOrNull(2500) { searchITunesTv(query, yearFilter, langFilter) } ?: emptyList() },
-                async { withTimeoutOrNull(2500) { searchOmdbSeries(query, yearFilter) } ?: emptyList() }
+                async { withTimeoutOrNull(2500) { searchITunesTv(query, yearFilter, langFilter) } ?: emptyList() }
             )
             TvSubFilter.ANIME -> listOf(
                 async { withTimeoutOrNull(2500) { searchAniListAnime(query, yearFilter) } ?: emptyList() }
@@ -1582,54 +1537,6 @@ class SearchRepository {
             e.printStackTrace()
         }
         return results
-    }
-
-    private suspend fun searchOmdbSeries(query: String, yearFilter: String? = null): List<SearchResult> = coroutineScope {
-        val encoded = URLEncoder.encode(query, "UTF-8")
-        val yearParam = if (!yearFilter.isNullOrBlank()) "&y=${URLEncoder.encode(yearFilter.trim(), "UTF-8")}" else ""
-
-        val deferredPages = (1..2).map { page ->
-            async {
-                val results = mutableListOf<SearchResult>()
-                try {
-                    val url = "https://www.omdbapi.com/?s=$encoded$yearParam&type=series&page=$page&apikey=trilogy"
-                    val req = Request.Builder()
-                        .url(url)
-                        .header("User-Agent", "ListsApp/1.0")
-                        .build()
-
-                    client.newCall(req).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val body = response.body?.string() ?: ""
-                            val json = JSONObject(body)
-                            if (json.optString("Response") == "True") {
-                                val searchArr = json.optJSONArray("Search") ?: JSONArray()
-                                for (i in 0 until searchArr.length()) {
-                                    val item = searchArr.getJSONObject(i)
-                                    val title = item.optString("Title")
-                                    val year = item.optString("Year")
-                                    var poster = item.optString("Poster")
-                                    if (poster == "N/A") poster = ""
-                                    val imdbId = item.optString("imdbID")
-
-                                    results.add(
-                                        SearchResult(
-                                            title = title,
-                                            releaseYear = year,
-                                            coverUrl = poster,
-                                            category = Category.TV_SHOW,
-                                            externalUrl = if (imdbId.isNotEmpty()) "https://www.imdb.com/title/$imdbId" else ""
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-                results
-            }
-        }
-        deferredPages.awaitAll().flatten()
     }
 
     // -------------------------------------------------------------
@@ -1766,7 +1673,6 @@ class SearchRepository {
             BookSubFilter.BOOKS -> listOf(
                 async { withTimeoutOrNull(2600) { searchAppleBooks(query, langFilter) } ?: emptyList() },
                 async { withTimeoutOrNull(2600) { searchOpenLibrary(query, bookSearchType, langFilter) } ?: emptyList() },
-                async { withTimeoutOrNull(2600) { searchHardcover(query) } ?: emptyList() },
                 async { withTimeoutOrNull(2600) { searchGoogleBooks(query, langFilter, bookSearchType) } ?: emptyList() }
             )
             BookSubFilter.COMICS -> listOf(
@@ -1836,63 +1742,6 @@ class SearchRepository {
                                     overview = if (issueCount > 0) "$issueCount issues by $publisher" else publisher,
                                     category = Category.COMIC,
                                     externalUrl = if (id.isNotBlank()) "https://www.comics.org/series/$id" else ""
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-        return results
-    }
-
-    private fun searchHardcover(query: String): List<SearchResult> {
-        val results = mutableListOf<SearchResult>()
-        try {
-            val qEscaped = query.trim().replace("\"", "\\\"")
-            val queryStr = """
-                query SearchBooks {
-                  books(where: {title: {_ilike: "%$qEscaped%"}}, limit: 10) {
-                    id
-                    title
-                    release_year
-                    cached_image
-                    description
-                  }
-                }
-            """.trimIndent()
-            val reqJson = JSONObject().apply {
-                put("query", queryStr)
-            }
-            val reqBody = reqJson.toString().toRequestBody("application/json".toMediaType())
-            val req = Request.Builder()
-                .url("https://api.hardcover.app/v1/graphql")
-                .header("User-Agent", "ListsApp/1.0")
-                .post(reqBody)
-                .build()
-            client.newCall(req).execute().use { response ->
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: ""
-                    val root = JSONObject(body)
-                    val data = root.optJSONObject("data")
-                    val books = data?.optJSONArray("books") ?: JSONArray()
-                    for (i in 0 until books.length()) {
-                        val b = books.getJSONObject(i)
-                        val title = b.optString("title")
-                        val year = b.optString("release_year")
-                        val img = b.optJSONObject("cached_image")?.optString("url") ?: ""
-                        val desc = b.optString("description")
-                        val id = b.optString("id")
-                        if (title.isNotBlank()) {
-                            results.add(
-                                SearchResult(
-                                    title = title,
-                                    releaseYear = year,
-                                    releaseDate = year,
-                                    coverUrl = img,
-                                    overview = cleanHtml(desc),
-                                    category = Category.BOOK,
-                                    externalUrl = if (id.isNotBlank()) "https://hardcover.app/books/$id" else ""
                                 )
                             )
                         }
