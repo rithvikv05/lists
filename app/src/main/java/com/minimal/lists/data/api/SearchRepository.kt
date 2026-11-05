@@ -265,7 +265,7 @@ object FuzzyMatcher {
 
 class SearchRepository {
     companion object {
-        var remoteEngineUrl: String = "https://lists-search-engine.workers.dev/v1"
+        var remoteEngineUrl: String = "https://lists-search-engine.minimal-lists.workers.dev/v1"
         private val searchCache = object : android.util.LruCache<String, List<SearchResult>>(200) {}
         private val inFlightRequests = ConcurrentHashMap<String, Deferred<List<SearchResult>>>()
         private val negativeCache = ConcurrentHashMap<String, Long>()

@@ -251,7 +251,7 @@ object FuzzyMatcher {
 
 class SearchRepository {
     companion object {
-        var remoteEngineUrl: String = "https://lists-search-engine.workers.dev/v1"
+        var remoteEngineUrl: String = "https://lists-search-engine.minimal-lists.workers.dev/v1"
         private val searchCache = mutableMapOf<String, List<SearchResult>>()
         private val inFlightRequests = mutableMapOf<String, Deferred<List<SearchResult>>>()
         private val negativeCache = mutableMapOf<String, Long>()

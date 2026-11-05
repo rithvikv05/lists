@@ -58,3 +58,4 @@ export async function searchWikipediaGames(query: string, year?: string): Promis
     return [];
   }
 }
+
