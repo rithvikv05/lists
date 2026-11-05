@@ -45,3 +45,4 @@ export async function searchOpenLibraryManga(query: string, year?: string): Prom
     return [];
   }
 }
+

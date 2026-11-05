@@ -48,3 +48,4 @@ export async function searchAppleComics(query: string, year?: string): Promise<S
     return [];
   }
 }
+

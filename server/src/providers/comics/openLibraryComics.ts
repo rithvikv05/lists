@@ -45,3 +45,4 @@ export async function searchOpenLibraryComics(query: string, year?: string): Pro
     return [];
   }
 }
+

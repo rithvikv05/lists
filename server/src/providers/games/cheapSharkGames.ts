@@ -45,3 +45,4 @@ export async function searchCheapSharkGames(query: string, year?: string): Promi
     return [];
   }
 }
+

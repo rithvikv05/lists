@@ -60,3 +60,4 @@ export async function searchJustWatchMovie(query: string, year?: string): Promis
     return [];
   }
 }
+

@@ -56,3 +56,4 @@ export async function searchTvmazeAnime(query: string, year?: string): Promise<S
     return [];
   }
 }
+

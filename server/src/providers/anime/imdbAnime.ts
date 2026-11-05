@@ -57,3 +57,4 @@ export async function searchImdbAnime(query: string, year?: string): Promise<Sea
     return [];
   }
 }
+

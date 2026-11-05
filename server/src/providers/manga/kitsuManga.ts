@@ -52,3 +52,4 @@ export async function searchKitsuManga(query: string, year?: string): Promise<Se
     return [];
   }
 }
+

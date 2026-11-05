@@ -58,3 +58,4 @@ export async function searchWikidataGames(query: string, year?: string): Promise
     return [];
   }
 }
+

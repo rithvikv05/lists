@@ -52,3 +52,4 @@ export async function searchKitsuAnime(query: string, year?: string): Promise<Se
     return [];
   }
 }
+

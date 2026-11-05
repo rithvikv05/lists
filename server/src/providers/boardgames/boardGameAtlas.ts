@@ -48,3 +48,4 @@ export async function searchBoardGameAtlas(query: string, year?: string): Promis
     return [];
   }
 }
+

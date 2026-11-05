@@ -53,3 +53,4 @@ export async function searchJikanAnime(query: string, year?: string): Promise<Se
     return [];
   }
 }
+

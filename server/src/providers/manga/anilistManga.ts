@@ -96,3 +96,4 @@ export async function searchAnilistManga(query: string, year?: string): Promise<
     return [];
   }
 }
+

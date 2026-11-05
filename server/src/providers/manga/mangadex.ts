@@ -61,3 +61,4 @@ export async function searchMangaDex(query: string, year?: string): Promise<Sear
     return [];
   }
 }
+

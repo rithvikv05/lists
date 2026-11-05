@@ -45,3 +45,4 @@ export async function searchOpenLibraryBoardGames(query: string, year?: string):
     return [];
   }
 }
+

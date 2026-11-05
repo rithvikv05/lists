@@ -52,3 +52,4 @@ export async function searchGoogleBooksManga(query: string, year?: string): Prom
     return [];
   }
 }
+

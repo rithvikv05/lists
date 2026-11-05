@@ -1,0 +1,10 @@
+# Cloudflare Workers Local Development Secrets (Wrangler)
+# Copy this file to .dev.vars to load secrets locally during `npm run dev`
+ENVIRONMENT="development"
+OMDB_API_KEY="trilogy"
+TMDB_API_KEY=""
+HARDCOVER_API_TOKEN=""
+RAWG_API_KEY=""
+TWITCH_CLIENT_ID=""
+TWITCH_CLIENT_SECRET=""
+COMIC_VINE_API_KEY=""

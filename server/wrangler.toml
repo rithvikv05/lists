@@ -7,7 +7,11 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 ENVIRONMENT = "production"
 OMDB_API_KEY = "trilogy"
-# HARDCOVER_API_TOKEN = "" # Set via wrangler secret put HARDCOVER_API_TOKEN
-# TWITCH_CLIENT_ID = ""    # Set via wrangler secret put TWITCH_CLIENT_ID
-# TWITCH_CLIENT_SECRET = "" # Set via wrangler secret put TWITCH_CLIENT_SECRET
 
+# The following keys are optional and can be set via Cloudflare Secrets:
+# npx wrangler secret put TMDB_API_KEY
+# npx wrangler secret put HARDCOVER_API_TOKEN
+# npx wrangler secret put RAWG_API_KEY
+# npx wrangler secret put COMIC_VINE_API_KEY
+# npx wrangler secret put TWITCH_CLIENT_ID
+# npx wrangler secret put TWITCH_CLIENT_SECRET

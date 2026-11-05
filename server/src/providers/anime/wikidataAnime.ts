@@ -58,3 +58,4 @@ export async function searchWikidataAnime(query: string, year?: string): Promise
     return [];
   }
 }
+

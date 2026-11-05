@@ -50,3 +50,4 @@ export async function searchJikanManga(query: string, year?: string): Promise<Se
     return [];
   }
 }
+
