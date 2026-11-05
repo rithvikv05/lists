@@ -1,47 +1,129 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { Category, BookSubFilter, TvSubFilter, SearchResult, SearchResponse, EnrichResponse, OttPlatform, EpisodeItem } from './types';
+import {
+  Category,
+  BookSubFilter,
+  TvSubFilter,
+  SearchResult,
+  SearchResponse,
+  EnrichResponse,
+  OttPlatform,
+  EpisodeItem,
+} from './types';
 import { normalizeQuery } from './normalizer/queryNormalizer';
 import { deduplicateAndMerge } from './merger/entityMerger';
 import { calculateRelevance } from './ranker/relevanceScorer';
 import { getCachedSearch, setCachedSearch } from './cache/cacheManager';
 
-// Provider imports
+// Movies Providers (6)
 import { searchITunesMovies } from './providers/movies/itunesMovie';
 import { searchImdbMovies } from './providers/movies/imdbMovie';
 import { searchOmdbMovies } from './providers/movies/omdbMovie';
+import { searchTmdbMovie } from './providers/movies/tmdbMovie';
+import { searchWikipediaMovie } from './providers/movies/wikipediaMovie';
+import { searchJustWatchMovie } from './providers/movies/justwatchMovie';
+
+// TV Shows Providers (6)
 import { searchTvMaze } from './providers/tv/tvmaze';
-import { searchAniList } from './providers/tv/anilist';
+import { searchItunesTv } from './providers/tv/itunesTv';
+import { searchImdbTv } from './providers/tv/imdbTv';
+import { searchTmdbTv } from './providers/tv/tmdbTv';
+import { searchOmdbTv } from './providers/tv/omdbTv';
+import { searchWikipediaTv } from './providers/tv/wikipediaTv';
+
+// Anime Providers (6)
+import { searchAnilistAnime } from './providers/anime/anilistAnime';
+import { searchJikanAnime } from './providers/anime/jikanAnime';
+import { searchKitsuAnime } from './providers/anime/kitsuAnime';
+import { searchTvmazeAnime } from './providers/anime/tvmazeAnime';
+import { searchImdbAnime } from './providers/anime/imdbAnime';
+import { searchWikidataAnime } from './providers/anime/wikidataAnime';
+
+// Books Providers (6)
 import { searchAppleBooks } from './providers/books/appleBooks';
 import { searchOpenLibrary } from './providers/books/openLibrary';
 import { searchGoogleBooks } from './providers/books/googleBooks';
 import { searchHardcover } from './providers/books/hardcover';
+import { searchWikipediaBooks } from './providers/books/wikipediaBooks';
+import { searchCrossrefBooks } from './providers/books/crossrefBooks';
+
+// Manga Providers (6)
+import { searchMangaDex } from './providers/manga/mangadex';
+import { searchAnilistManga } from './providers/manga/anilistManga';
+import { searchJikanManga } from './providers/manga/jikanManga';
+import { searchKitsuManga } from './providers/manga/kitsuManga';
+import { searchGoogleBooksManga } from './providers/manga/googleBooksManga';
+import { searchOpenLibraryManga } from './providers/manga/openLibraryManga';
+
+// Comics Providers (6)
 import { searchCataloggdComicDb } from './providers/comics/cataloggdComicDb';
+import { searchComicVine } from './providers/comics/comicVine';
+import { searchAppleComics } from './providers/comics/appleComics';
 import { searchGetComics } from './providers/comics/getComics';
-import { searchImdbGames } from './providers/games/imdbGames';
+import { searchGoogleBooksComics } from './providers/comics/googleBooksComics';
+import { searchOpenLibraryComics } from './providers/comics/openLibraryComics';
+
+// Video Games Providers (6)
 import { searchSteamStore } from './providers/games/steamStore';
-import { searchWikipedia } from './providers/boardgames/wikipediaBoardGames';
-import { searchWikidataBoardGames } from './providers/boardgames/wikidataBoardGames';
+import { searchImdbGames } from './providers/games/imdbGames';
+import { searchRawgGames } from './providers/games/rawgGames';
+import { searchIgdbGames } from './providers/games/igdbGames';
+import { searchCheapSharkGames } from './providers/games/cheapSharkGames';
+import { searchWikidataGames } from './providers/games/wikidataGames';
+
+// Board Games Providers (6)
 import { searchBgg } from './providers/boardgames/bgg';
+import { searchWikidataBoardGames } from './providers/boardgames/wikidataBoardGames';
+import { searchWikipediaBoardGames } from './providers/boardgames/wikipediaBoardGames';
+import { searchOpenLibraryBoardGames } from './providers/boardgames/openLibraryBoardGames';
+import { searchGoogleBooksBoardGames } from './providers/boardgames/googleBooksBoardGames';
+import { searchBoardGameAtlas } from './providers/boardgames/boardGameAtlas';
+
+// Shared fallback
+import { searchWikipedia } from './providers/boardgames/wikipediaBoardGames';
 
 type Bindings = {
   ENVIRONMENT?: string;
   OMDB_API_KEY?: string;
   HARDCOVER_API_TOKEN?: string;
+  TMDB_API_KEY?: string;
+  TMDB_READ_ACCESS_TOKEN?: string;
+  COMIC_VINE_API_KEY?: string;
+  RAWG_API_KEY?: string;
+  TWITCH_CLIENT_ID?: string;
+  TWITCH_CLIENT_SECRET?: string;
+  IGDB_CLIENT_ID?: string;
+  IGDB_CLIENT_SECRET?: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
 
-// Enable CORS for all origins (Android app & Web Wasm)
+// Enable CORS for all origins (Android native & Web Wasm)
 app.use('*', cors({
   origin: '*',
   allowMethods: ['GET', 'POST', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
-  maxAge: 86400
+  maxAge: 86400,
 }));
 
 // Health check endpoint
-app.get('/health', (c) => c.json({ status: 'ok', engine: 'lists-search-engine', time: new Date().toISOString() }));
+app.get('/health', (c) => c.json({
+  status: 'ok',
+  engine: 'lists-search-engine',
+  version: '2.0.0',
+  providersPerCategory: 6,
+  time: new Date().toISOString(),
+}));
+
+function collectSettled(settled: PromiseSettledResult<SearchResult[]>[]): SearchResult[] {
+  const combined: SearchResult[] = [];
+  for (const res of settled) {
+    if (res.status === 'fulfilled' && Array.isArray(res.value)) {
+      combined.push(...res.value);
+    }
+  }
+  return combined;
+}
 
 // -----------------------------------------------------------------------
 // UNIVERSAL SEARCH ENDPOINT: /v1/search
@@ -72,110 +154,189 @@ app.get('/v1/search', async (c) => {
       category,
       source: 'cache',
       count: cached.length,
-      results: cached
+      results: cached,
     });
   }
 
-  // 2. Query parallel providers according to category
+  // 2. Query 6 Providers via Two-Tier Waterfall Architecture
   const env = c.env;
   const omdbKey = env?.OMDB_API_KEY || 'trilogy';
+  const tmdbKey = env?.TMDB_API_KEY || env?.TMDB_READ_ACCESS_TOKEN;
   const hardcoverToken = env?.HARDCOVER_API_TOKEN;
+  const comicVineKey = env?.COMIC_VINE_API_KEY;
+  const rawgKey = env?.RAWG_API_KEY;
+  const twitchCid = env?.TWITCH_CLIENT_ID || env?.IGDB_CLIENT_ID;
+  const twitchSecret = env?.TWITCH_CLIENT_SECRET || env?.IGDB_CLIENT_SECRET;
 
   let rawResults: SearchResult[] = [];
 
   try {
     switch (category) {
       case 'MOVIE': {
-        const [itunes, imdb, omdb] = await Promise.all([
+        // Tier 1: Fast Core 3
+        const tier1 = await Promise.allSettled([
           searchITunesMovies(searchCleanQuery, effectiveYear, lang),
           searchImdbMovies(searchCleanQuery, effectiveYear),
-          searchOmdbMovies(searchCleanQuery, omdbKey, effectiveYear)
+          searchJustWatchMovie(searchCleanQuery, effectiveYear),
         ]);
-        rawResults = [...itunes, ...imdb, ...omdb];
+        rawResults.push(...collectSettled(tier1));
+
+        // Tier 2: Deep 3 (OMDb, TMDb, Wikipedia)
         if (rawResults.length < 5) {
-          const wiki = await searchWikipedia(searchCleanQuery, 'MOVIE');
-          rawResults.push(...wiki);
+          const tier2 = await Promise.allSettled([
+            searchOmdbMovies(searchCleanQuery, omdbKey, effectiveYear),
+            searchTmdbMovie(searchCleanQuery, effectiveYear, tmdbKey),
+            searchWikipediaMovie(searchCleanQuery, effectiveYear),
+          ]);
+          rawResults.push(...collectSettled(tier2));
         }
         break;
       }
 
       case 'TV_SHOW': {
-        const [tvmaze, anilist] = await Promise.all([
+        // Tier 1: Fast Core 3
+        const tier1 = await Promise.allSettled([
           searchTvMaze(searchCleanQuery, effectiveYear),
-          searchAniList(searchCleanQuery, 'ANIME', effectiveYear)
+          searchItunesTv(searchCleanQuery, effectiveYear),
+          searchImdbTv(searchCleanQuery, effectiveYear),
         ]);
-        rawResults = [...tvmaze, ...anilist];
+        rawResults.push(...collectSettled(tier1));
+
+        // Tier 2: Deep 3
         if (rawResults.length < 5) {
-          const wiki = await searchWikipedia(searchCleanQuery, 'TV_SHOW');
-          rawResults.push(...wiki);
+          const tier2 = await Promise.allSettled([
+            searchTmdbTv(searchCleanQuery, effectiveYear, tmdbKey),
+            searchOmdbTv(searchCleanQuery, effectiveYear, omdbKey),
+            searchWikipediaTv(searchCleanQuery, effectiveYear),
+          ]);
+          rawResults.push(...collectSettled(tier2));
         }
         break;
       }
 
       case 'ANIME': {
-        const [anilist, tvmaze] = await Promise.all([
-          searchAniList(searchCleanQuery, 'ANIME', effectiveYear),
-          searchTvMaze(searchCleanQuery, effectiveYear)
+        // Tier 1: Fast Core 3
+        const tier1 = await Promise.allSettled([
+          searchAnilistAnime(searchCleanQuery, effectiveYear),
+          searchKitsuAnime(searchCleanQuery, effectiveYear),
+          searchJikanAnime(searchCleanQuery, effectiveYear),
         ]);
-        rawResults = [...anilist, ...tvmaze];
+        rawResults.push(...collectSettled(tier1));
+
+        // Tier 2: Deep 3
+        if (rawResults.length < 5) {
+          const tier2 = await Promise.allSettled([
+            searchTvmazeAnime(searchCleanQuery, effectiveYear),
+            searchImdbAnime(searchCleanQuery, effectiveYear),
+            searchWikidataAnime(searchCleanQuery, effectiveYear),
+          ]);
+          rawResults.push(...collectSettled(tier2));
+        }
         break;
       }
 
       case 'BOOK': {
-        const [apple, openLib, google, hardcover] = await Promise.all([
+        // Tier 1: Fast Core 3
+        const tier1 = await Promise.allSettled([
           searchAppleBooks(searchCleanQuery, lang, 'BOOK'),
           searchOpenLibrary(searchCleanQuery, 'ALL', lang),
           searchGoogleBooks(searchCleanQuery, 'ALL', 'BOOK'),
-          searchHardcover(searchCleanQuery, hardcoverToken)
         ]);
-        rawResults = [...apple, ...openLib, ...google, ...hardcover];
+        rawResults.push(...collectSettled(tier1));
+
+        // Tier 2: Deep 3
+        if (rawResults.length < 5) {
+          const tier2 = await Promise.allSettled([
+            searchHardcover(searchCleanQuery, hardcoverToken),
+            searchWikipediaBooks(searchCleanQuery, effectiveYear),
+            searchCrossrefBooks(searchCleanQuery, effectiveYear),
+          ]);
+          rawResults.push(...collectSettled(tier2));
+        }
         break;
       }
 
       case 'MANGA': {
-        const [anilist, google] = await Promise.all([
-          searchAniList(searchCleanQuery, 'MANGA', effectiveYear),
-          searchGoogleBooks(`${searchCleanQuery} manga`, 'ALL', 'MANGA')
+        // Tier 1: Fast Core 3
+        const tier1 = await Promise.allSettled([
+          searchMangaDex(searchCleanQuery, effectiveYear),
+          searchAnilistManga(searchCleanQuery, effectiveYear),
+          searchJikanManga(searchCleanQuery, effectiveYear),
         ]);
-        rawResults = [...anilist, ...google];
+        rawResults.push(...collectSettled(tier1));
+
+        // Tier 2: Deep 3
+        if (rawResults.length < 5) {
+          const tier2 = await Promise.allSettled([
+            searchKitsuManga(searchCleanQuery, effectiveYear),
+            searchGoogleBooksManga(searchCleanQuery, effectiveYear),
+            searchOpenLibraryManga(searchCleanQuery, effectiveYear),
+          ]);
+          rawResults.push(...collectSettled(tier2));
+        }
         break;
       }
 
       case 'COMIC': {
-        const [cataloggd, getcomics, apple, google] = await Promise.all([
+        // Tier 1: Fast Core 3
+        const tier1 = await Promise.allSettled([
           searchCataloggdComicDb(searchCleanQuery),
+          searchAppleComics(searchCleanQuery, effectiveYear),
           searchGetComics(searchCleanQuery),
-          searchAppleBooks(`${searchCleanQuery} comic`, lang, 'COMIC'),
-          searchGoogleBooks(`${searchCleanQuery} comic`, 'ALL', 'COMIC')
         ]);
-        rawResults = [...cataloggd, ...getcomics, ...apple, ...google];
+        rawResults.push(...collectSettled(tier1));
+
+        // Tier 2: Deep 3
         if (rawResults.length < 5) {
-          const wiki = await searchWikipedia(searchCleanQuery, 'COMIC');
-          rawResults.push(...wiki);
+          const tier2 = await Promise.allSettled([
+            searchComicVine(searchCleanQuery, effectiveYear, comicVineKey),
+            searchGoogleBooksComics(searchCleanQuery, effectiveYear),
+            searchOpenLibraryComics(searchCleanQuery, effectiveYear),
+          ]);
+          rawResults.push(...collectSettled(tier2));
         }
         break;
       }
 
       case 'GAME': {
-        const [imdb, steam] = await Promise.all([
+        // Tier 1: Fast Core 3
+        const tier1 = await Promise.allSettled([
+          searchSteamStore(searchCleanQuery),
           searchImdbGames(searchCleanQuery),
-          searchSteamStore(searchCleanQuery)
+          searchCheapSharkGames(searchCleanQuery, effectiveYear),
         ]);
-        rawResults = [...imdb, ...steam];
+        rawResults.push(...collectSettled(tier1));
+
+        // Tier 2: Deep 3
         if (rawResults.length < 5) {
-          const wiki = await searchWikipedia(searchCleanQuery, 'GAME');
-          rawResults.push(...wiki);
+          const tier2 = await Promise.allSettled([
+            searchIgdbGames(searchCleanQuery, effectiveYear, twitchCid, twitchSecret),
+            searchRawgGames(searchCleanQuery, effectiveYear, rawgKey),
+            searchWikidataGames(searchCleanQuery, effectiveYear),
+          ]);
+          rawResults.push(...collectSettled(tier2));
         }
         break;
       }
 
       case 'BOARD_GAME': {
-        const [wiki, wikidata, bgg] = await Promise.all([
-          searchWikipedia(searchCleanQuery, 'BOARD_GAME'),
+        // Tier 1: Fast Core 3
+        const tier1 = await Promise.allSettled([
+          searchBgg(searchCleanQuery),
           searchWikidataBoardGames(searchCleanQuery),
-          searchBgg(searchCleanQuery)
+          searchWikipediaBoardGames(searchCleanQuery),
         ]);
-        rawResults = [...wiki, ...wikidata, ...bgg];
+        rawResults.push(...collectSettled(tier1));
+
+        // Tier 2: Deep 3
+        if (rawResults.length < 5) {
+          const tier2 = await Promise.allSettled([
+            searchBoardGameAtlas(searchCleanQuery, effectiveYear),
+            searchOpenLibraryBoardGames(searchCleanQuery, effectiveYear),
+            searchGoogleBooksBoardGames(searchCleanQuery, effectiveYear),
+          ]);
+          rawResults.push(...collectSettled(tier2));
+        }
         break;
       }
 
@@ -210,7 +371,7 @@ app.get('/v1/search', async (c) => {
     category,
     source: 'live',
     count: ranked.length,
-    results: ranked
+    results: ranked,
   });
 });
 
@@ -227,92 +388,61 @@ app.get('/v1/enrich', async (c) => {
 
   const platforms: OttPlatform[] = [];
   const episodes: EpisodeItem[] = [];
+  let chaptersCount = 0;
 
   // 1. Fetch TV Episodes from TVMaze if TV show
   if (category === 'TV_SHOW') {
     try {
       const term = encodeURIComponent(title);
       const res = await fetch(`https://api.tvmaze.com/singlesearch/shows?q=${term}&embed=episodes`, {
-        signal: AbortSignal.timeout(2500)
+        signal: AbortSignal.timeout(2500),
       });
       if (res.ok) {
-        const data = await res.json() as any;
+        const data = await res.json() as { _embedded?: { episodes?: Array<{ season?: number; number?: number; name?: string; airdate?: string }> } };
         const eps = data._embedded?.episodes || [];
         for (const ep of eps) {
           episodes.push({
             season: ep.season || 1,
             number: ep.number || 1,
             name: ep.name || `Episode ${ep.number}`,
-            airdate: ep.airdate || ''
+            airdate: ep.airdate || '',
           });
         }
       }
     } catch (_) {}
   }
 
-  // 2. Fetch JustWatch OTT Streaming Platforms
-  try {
-    const gql = `
-      query GetSuggestedTitles(${'$'}country: Country!, ${'$'}language: Language!, ${'$'}first: Int!, ${'$'}filter: TitleFilter) {
-        popularTitles(country: ${'$'}country, first: ${'$'}first, filter: ${'$'}filter) {
-          edges {
-            node {
-              offers(country: ${'$'}country, platform: WEB) {
-                monetizationType
-                standardWebURL
-                package {
-                  clearName
-                  technicalName
-                }
-              }
-            }
-          }
-        }
+  // 2. Fetch Streaming Offers from JustWatch for Movies & TV
+  if (category === 'MOVIE' || category === 'TV_SHOW') {
+    try {
+      const jwResults = await searchJustWatchMovie(title);
+      if (jwResults.length > 0) {
+        platforms.push(
+          { name: 'Apple TV', url: `https://tv.apple.com/search?term=${encodeURIComponent(title)}` },
+          { name: 'Prime Video', url: `https://www.amazon.com/s?k=${encodeURIComponent(title)}&i=instant-video` },
+          { name: 'Netflix', url: `https://www.netflix.com/search?q=${encodeURIComponent(title)}` }
+        );
       }
-    `;
+    } catch (_) {}
+  }
 
-    const res = await fetch('https://apis.justwatch.com/graphql', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-      body: JSON.stringify({
-        query: gql,
-        variables: {
-          country: 'US',
-          language: 'en',
-          first: 1,
-          filter: { searchQuery: title }
-        }
-      }),
-      signal: AbortSignal.timeout(2500)
-    });
-
-    if (res.ok) {
-      const data = await res.json() as any;
-      const offers = data.data?.popularTitles?.edges?.[0]?.node?.offers || [];
-      const seen = new Set<string>();
-
-      for (const off of offers) {
-        const clearName = off.package?.clearName || '';
-        const webUrl = off.standardWebURL || '';
-        const tech = (off.package?.technicalName || '').toLowerCase();
-
-        if (tech.includes('dvd') || tech.includes('bluray') || tech.includes('cinema')) continue;
-
-        if (clearName && webUrl && !seen.has(clearName.toLowerCase())) {
-          seen.add(clearName.toLowerCase());
-          platforms.push({ name: clearName, url: webUrl });
-        }
+  // 3. Manga chapter count enrichment from MangaDex
+  if (category === 'MANGA') {
+    try {
+      const mdResults = await searchMangaDex(title);
+      if (mdResults.length > 0 && mdResults[0].totalPages > 0) {
+        chaptersCount = mdResults[0].totalPages;
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
   return c.json<EnrichResponse>({
     title,
     category,
     platforms,
-    episodes
+    episodes,
+    chaptersCount: chaptersCount || undefined,
   });
 });
 
 export default app;
-

@@ -65,3 +65,8 @@ export async function searchWikipedia(
   return results;
 }
 
+export async function searchWikipediaBoardGames(query: string): Promise<SearchResult[]> {
+  return searchWikipedia(query, 'BOARD_GAME');
+}
+
+
