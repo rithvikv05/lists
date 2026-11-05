@@ -552,43 +552,37 @@ fun ListDetailScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Left: Official Material 3 Segmented Button Row (All | Done | Remaining)
-                    SingleChoiceSegmentedButtonRow(
-                        modifier = Modifier
-                            .weight(1f, fill = false)
-                            .height(34.dp)
+                    // Left: Quick Filter Pills (All | Done | Remaining)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        ItemStatusFilter.entries.forEachIndexed { index, filter ->
+                        ItemStatusFilter.entries.forEach { filter ->
                             val isSelected = statusFilter == filter
-                            SegmentedButton(
-                                selected = isSelected,
-                                onClick = {
-                                    statusFilter = filter
-                                    triggerAsmrTick(context)
-                                },
-                                shape = SegmentedButtonDefaults.itemShape(
-                                    index = index,
-                                    count = ItemStatusFilter.entries.size
-                                ),
-                                colors = SegmentedButtonDefaults.colors(
-                                    activeContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    activeContentColor = MaterialTheme.colorScheme.primary,
-                                    inactiveContainerColor = Color.Transparent,
-                                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    activeBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                                    inactiveBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                                ),
-                                icon = {},
-                                label = {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                                border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
+                                modifier = Modifier
+                                    .height(32.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        statusFilter = filter
+                                        triggerAsmrTick(context)
+                                    }
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     Text(
                                         text = filter.displayName,
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = MaterialTheme.typography.labelMedium,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                            )
+                            }
                         }
                     }
 

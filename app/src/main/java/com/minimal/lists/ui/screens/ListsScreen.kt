@@ -243,65 +243,61 @@ fun ListsScreen(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         floatingActionButton = {
-            // 2D Minimal, Flush "New List" Box (No shadows, No + plus icon, centered text, same size as Create List)
-            Surface(
-                onClick = {
-                    triggerStrongTick(context)
-                    showCreateSheet = true
-                },
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                shadowElevation = 0.dp,
-                modifier = Modifier
-                    .padding(bottom = 24.dp)
-                    .height(40.dp)
-            ) {
-                Box(
+            if (selectedListIds.isEmpty()) {
+                // 2D Minimal, Flush "New List" Box (No shadows, No + plus icon, centered text, same size as Create List)
+                Surface(
+                    onClick = {
+                        triggerStrongTick(context)
+                        showCreateSheet = true
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    shadowElevation = 0.dp,
                     modifier = Modifier
-                        .padding(horizontal = 20.dp)
-                        .fillMaxHeight(),
-                    contentAlignment = Alignment.Center
+                        .padding(bottom = 24.dp)
+                        .height(40.dp)
                 ) {
-                    Text(
-                        text = "New List",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 20.dp)
+                            .fillMaxHeight(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "New List",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
     ) { padding ->
-        PullToRefreshBox(
-            isRefreshing = isRefreshing,
-            onRefresh = onPullRefresh,
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .then(
+                    if (showSearchBar) {
+                        Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            focusManager.clearFocus()
+                            showSearchBar = false
+                            searchQuery = ""
+                        }
+                    } else Modifier
+                ),
+            contentAlignment = Alignment.TopCenter
         ) {
-            Box(
+            Column(
                 modifier = Modifier
+                    .fillMaxWidth()
                     .fillMaxSize()
-                    .then(
-                        if (showSearchBar) {
-                            Modifier.clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                focusManager.clearFocus()
-                                showSearchBar = false
-                                searchQuery = ""
-                            }
-                        } else Modifier
-                    ),
-                contentAlignment = Alignment.TopCenter
+                    .padding(horizontal = if (isWideLayout) 24.dp else 16.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxSize()
-                        .padding(horizontal = if (isWideLayout) 24.dp else 16.dp)
-                ) {
                 // Top Header Row matching Stitch Screen #11 & #23 with zero extra black gap
                 if (selectedListIds.isNotEmpty()) {
                     val selectedLists = displayedLists.filter { selectedListIds.contains(it.list.id) }.map { it.list }
@@ -317,80 +313,105 @@ fun ListsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = {
-                                triggerStrongTick(context)
-                                selectedListIds = emptySet()
-                            }) {
-                                Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurface)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    triggerStrongTick(context)
+                                    selectedListIds = emptySet()
+                                },
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(20.dp))
                             }
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = "${selectedListIds.size} selected",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             // Edit List (visible when exactly 1 list is selected)
                             if (selectedListIds.size == 1) {
-                                IconButton(onClick = {
+                                IconButton(
+                                    onClick = {
+                                        triggerStrongTick(context)
+                                        val list = selectedLists.firstOrNull()
+                                        if (list != null) {
+                                            listToEdit = list
+                                            selectedListIds = emptySet()
+                                        }
+                                    },
+                                    modifier = Modifier.size(38.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Edit List", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                }
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    triggerAsmrTick(context)
+                                    selectedListIds = if (selectedListIds.size == displayedLists.size) emptySet() else displayedLists.map { it.list.id }.toSet()
+                                },
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Icon(Icons.Default.SelectAll, contentDescription = "Select All", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(20.dp))
+                            }
+
+                            IconButton(
+                                onClick = {
                                     triggerStrongTick(context)
-                                    val list = selectedLists.firstOrNull()
-                                    if (list != null) {
-                                        listToEdit = list
+                                    scope.launch {
+                                        repository.setListsPinned(selectedLists, anyUnpinned)
                                         selectedListIds = emptySet()
                                     }
-                                }) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Edit List", tint = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-
-                            IconButton(onClick = {
-                                triggerAsmrTick(context)
-                                selectedListIds = if (selectedListIds.size == displayedLists.size) emptySet() else displayedLists.map { it.list.id }.toSet()
-                            }) {
-                                Icon(Icons.Default.SelectAll, contentDescription = "Select All", tint = MaterialTheme.colorScheme.onSurface)
-                            }
-
-                            IconButton(onClick = {
-                                triggerStrongTick(context)
-                                scope.launch {
-                                    repository.setListsPinned(selectedLists, anyUnpinned)
-                                    selectedListIds = emptySet()
-                                }
-                            }) {
+                                },
+                                modifier = Modifier.size(38.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.PushPin,
                                     contentDescription = if (anyUnpinned) "Pin" else "Unpin",
-                                    tint = if (anyUnpinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                    tint = if (anyUnpinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
 
-                            IconButton(onClick = {
-                                triggerStrongTick(context)
-                                scope.launch {
-                                    repository.setListsArchived(selectedLists, anyUnarchived)
-                                    selectedListIds = emptySet()
-                                }
-                            }) {
+                            IconButton(
+                                onClick = {
+                                    triggerStrongTick(context)
+                                    scope.launch {
+                                        repository.setListsArchived(selectedLists, anyUnarchived)
+                                        selectedListIds = emptySet()
+                                    }
+                                },
+                                modifier = Modifier.size(38.dp)
+                            ) {
                                 Icon(
                                     imageVector = if (isArchiveSelected) Icons.Default.Unarchive else Icons.Default.Archive,
                                     contentDescription = if (isArchiveSelected) "Unarchive" else "Archive",
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
 
-                            IconButton(onClick = {
-                                triggerStrongTick(context)
-                                showBulkDeleteDialog = true
-                            }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                            IconButton(
+                                onClick = {
+                                    triggerStrongTick(context)
+                                    showBulkDeleteDialog = true
+                                },
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                             }
                         }
                     }
@@ -981,5 +1002,4 @@ fun ListsScreen(
             shape = RoundedCornerShape(16.dp)
         )
     }
-}
 }
