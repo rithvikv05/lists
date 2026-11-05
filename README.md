@@ -109,6 +109,36 @@ The compiled WebAssembly distribution will be output to:
 
 ---
 
+## 🎁 Data Sources & API Credits
+
+**Lists** aggregates metadata and artwork from community-driven and open platforms. We are deeply grateful to the following projects, organizations, and APIs that make open media tracking possible:
+
+| Provider | Category | Description & Attribution |
+| :--- | :--- | :--- |
+| **IGDB (Twitch)** | Video Games | Comprehensive video game database, cover art, and release schedules. [igdb.com](https://www.igdb.com/) |
+| **OMDb API** | Movies & TV | Verified ratings, Rotten Tomatoes / Metacritic scores, and synopses by Brian Fritz. [omdbapi.com](https://www.omdbapi.com/) |
+| **The Movie Database (TMDb)** | Movies & TV | Movie and television metadata, backdrops, and cast. *(This product uses the TMDB API but is not endorsed or certified by TMDB).* [themoviedb.org](https://www.themoviedb.org/) |
+| **Hardcover** | Books | Modern book tracking, GraphQL API, reviews, and community ratings. [hardcover.app](https://hardcover.app/) |
+| **Comic Vine** | Comics | Massive comic book database, story arcs, and superhero issues. [comicvine.gamespot.com](https://comicvine.gamespot.com/) |
+| **Apple Services** | Multi-Media | High-resolution 1200px artwork for movies, TV, books, and digital graphic novels. [apple.com](https://www.apple.com/) |
+| **Open Library** | Books & Comics | Non-profit open library catalog and -L cover art archives by the Internet Archive. [openlibrary.org](https://openlibrary.org/) |
+| **Google Books** | Books & Manga | Bibliographic volume information, page counts, and descriptions. [books.google.com](https://books.google.com/) |
+| **AniList** | Anime & Manga | Fast GraphQL API for Japanese, Korean, and Chinese animation and sequential art. [anilist.co](https://anilist.co/) |
+| **Jikan (MyAnimeList)** | Anime & Manga | Open-source REST API for MyAnimeList community scores and staff credits. [jikan.moe](https://jikan.moe/) |
+| **Kitsu** | Anime & Manga | Anime/manga discovery platform with canonical titles and posters. [kitsu.io](https://kitsu.io/) |
+| **TVmaze** | TV Shows & Anime | Television broadcast schedules, episodic guides, and networks. [tvmaze.com](https://www.tvmaze.com/) |
+| **Steam (Valve)** | Video Games | Storefront API, Steam Deck tags, developer credits, and game capsules. [store.steampowered.com](https://store.steampowered.com/) |
+| **CheapShark** | Video Games | Video game pricing, retail storefronts, and Steam App ID resolution. [cheapshark.com](https://www.cheapshark.com/) |
+| **Grand Comics DB (GCD)** | Comics | Volunteer-driven comic book database covering issues from the 1930s to today. [comics.org](https://www.comics.org/) |
+| **MangaDex** | Manga | Manga chapter counts, high-resolution volume covers, and translations. [mangadex.org](https://mangadex.org/) |
+| **BoardGameGeek (BGG)** | Board Games | The definitive tabletop board game database, rankings, and player counts. [boardgamegeek.com](https://boardgamegeek.com/) |
+| **Board Game Atlas** | Board Games | Tabletop board game discovery catalog and box images. [boardgameatlas.com](https://www.boardgameatlas.com/) |
+| **JustWatch** | Movies & TV | Streaming availability and OTT direct links. [justwatch.com](https://www.justwatch.com/) |
+| **CrossRef** | Books & Academic | Authoritative DOI bibliographic records and publishing metadata. [crossref.org](https://www.crossref.org/) |
+| **Wikipedia & Wikidata** | Multi-Media | Open encyclopedic summaries and structured linked data under CC BY-SA. [wikimedia.org](https://www.wikimedia.org/) |
+
+---
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).

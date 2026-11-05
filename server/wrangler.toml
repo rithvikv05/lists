@@ -3,15 +3,15 @@ main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Production environment variables (optional keys for deeper access)
 [vars]
 ENVIRONMENT = "production"
-OMDB_API_KEY = "trilogy"
 
-# The following keys are optional and can be set via Cloudflare Secrets:
-# npx wrangler secret put TMDB_API_KEY
-# npx wrangler secret put HARDCOVER_API_TOKEN
-# npx wrangler secret put RAWG_API_KEY
-# npx wrangler secret put COMIC_VINE_API_KEY
-# npx wrangler secret put TWITCH_CLIENT_ID
-# npx wrangler secret put TWITCH_CLIENT_SECRET
+# Private keys are managed securely via Cloudflare Secrets:
+#   npx wrangler secret put OMDB_API_KEY
+#   npx wrangler secret put TMDB_API_KEY
+#   npx wrangler secret put HARDCOVER_API_TOKEN
+#   npx wrangler secret put COMIC_VINE_API_KEY
+#   npx wrangler secret put TWITCH_CLIENT_ID
+#   npx wrangler secret put TWITCH_CLIENT_SECRET
+#
+# For local dev, keys are loaded automatically from .dev.vars (which is git-ignored).

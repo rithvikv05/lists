@@ -64,12 +64,12 @@ import { searchGoogleBooksComics } from './providers/comics/googleBooksComics';
 import { searchOpenLibraryComics } from './providers/comics/openLibraryComics';
 
 // Video Games Providers (6)
+import { searchIgdbGames } from './providers/games/igdbGames';
 import { searchSteamStore } from './providers/games/steamStore';
 import { searchImdbGames } from './providers/games/imdbGames';
-import { searchRawgGames } from './providers/games/rawgGames';
-import { searchIgdbGames } from './providers/games/igdbGames';
 import { searchCheapSharkGames } from './providers/games/cheapSharkGames';
 import { searchWikidataGames } from './providers/games/wikidataGames';
+import { searchWikipediaGames } from './providers/games/wikipediaGames';
 
 // Board Games Providers (6)
 import { searchBgg } from './providers/boardgames/bgg';
@@ -160,13 +160,15 @@ app.get('/v1/search', async (c) => {
 
   // 2. Query 6 Providers via Two-Tier Waterfall Architecture
   const env = c.env;
-  const omdbKey = env?.OMDB_API_KEY || 'trilogy';
-  const tmdbKey = env?.TMDB_API_KEY || env?.TMDB_READ_ACCESS_TOKEN;
-  const hardcoverToken = env?.HARDCOVER_API_TOKEN;
-  const comicVineKey = env?.COMIC_VINE_API_KEY;
-  const rawgKey = env?.RAWG_API_KEY;
-  const twitchCid = env?.TWITCH_CLIENT_ID || env?.IGDB_CLIENT_ID;
-  const twitchSecret = env?.TWITCH_CLIENT_SECRET || env?.IGDB_CLIENT_SECRET;
+  const getEnv = (key: keyof Bindings): string | undefined =>
+    env?.[key] || ((globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[key]);
+
+  const omdbKey = getEnv('OMDB_API_KEY') || 'trilogy';
+  const tmdbKey = getEnv('TMDB_API_KEY') || getEnv('TMDB_READ_ACCESS_TOKEN');
+  const hardcoverToken = getEnv('HARDCOVER_API_TOKEN');
+  const comicVineKey = getEnv('COMIC_VINE_API_KEY');
+  const twitchCid = getEnv('TWITCH_CLIENT_ID') || getEnv('IGDB_CLIENT_ID');
+  const twitchSecret = getEnv('TWITCH_CLIENT_SECRET') || getEnv('IGDB_CLIENT_SECRET');
 
   let rawResults: SearchResult[] = [];
 
@@ -299,20 +301,20 @@ app.get('/v1/search', async (c) => {
       }
 
       case 'GAME': {
-        // Tier 1: Fast Core 3
+        // Tier 1: Fast Core 3 (IGDB primary, Steam Store, IMDb Games)
         const tier1 = await Promise.allSettled([
+          searchIgdbGames(searchCleanQuery, effectiveYear, twitchCid, twitchSecret),
           searchSteamStore(searchCleanQuery),
           searchImdbGames(searchCleanQuery),
-          searchCheapSharkGames(searchCleanQuery, effectiveYear),
         ]);
         rawResults.push(...collectSettled(tier1));
 
-        // Tier 2: Deep 3
+        // Tier 2: Deep 3 (CheapShark, Wikidata, Wikipedia)
         if (rawResults.length < 5) {
           const tier2 = await Promise.allSettled([
-            searchIgdbGames(searchCleanQuery, effectiveYear, twitchCid, twitchSecret),
-            searchRawgGames(searchCleanQuery, effectiveYear, rawgKey),
+            searchCheapSharkGames(searchCleanQuery, effectiveYear),
             searchWikidataGames(searchCleanQuery, effectiveYear),
+            searchWikipediaGames(searchCleanQuery, effectiveYear),
           ]);
           rawResults.push(...collectSettled(tier2));
         }

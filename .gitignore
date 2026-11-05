@@ -10,4 +10,13 @@ wasmApp/build/
 local.properties
 *.apk
 *.xapk
-.DS_Store
+
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.local
+node_modules/
