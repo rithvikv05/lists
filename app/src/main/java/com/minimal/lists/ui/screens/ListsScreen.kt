@@ -520,8 +520,9 @@ fun ListsScreen(
                         }
                     }
                 }
+            }
 
-                // Collapsible Search Bar (Unified ListsSearchBar, auto-closes on tap outside)
+            // Collapsible Search Bar (Unified ListsSearchBar, auto-closes on tap outside)
                 AnimatedVisibility(
                     visible = showSearchBar,
                     enter = expandVertically(animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)) + fadeIn(animationSpec = tween(durationMillis = 120)),
@@ -708,7 +709,6 @@ fun ListsScreen(
             }
         }
     }
-}
 
     // Scalable Category Selector Modal (Stitch #00 & #06)
     if (showCategoryModal) {
