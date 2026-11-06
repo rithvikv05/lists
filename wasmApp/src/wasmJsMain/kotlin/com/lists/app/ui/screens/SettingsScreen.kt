@@ -135,10 +135,14 @@ fun SettingsScreen(
     var isSyncing by remember { mutableStateOf(false) }
     var snapshots by remember { mutableStateOf(WebStore.getAvailableBackups()) }
 
-    LaunchedEffect(signedInAccount) {
+    val refreshSnapshots: suspend () -> Unit = {
         val local = WebStore.getAvailableBackups()
         val drive = if (signedInAccount != null) GoogleDriveSync.listDriveRollingBackups() else emptyList<WebStore.BackupInfo>()
         snapshots = local + drive
+    }
+
+    LaunchedEffect(signedInAccount) {
+        refreshSnapshots()
     }
 
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
@@ -523,25 +527,12 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = "Google Drive",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (signedInAccount != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                                    )
-                                    if (signedInAccount != null) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(6.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF00E676))
-                                        )
-                                    }
-                                }
+                                Text(
+                                    text = "Google Drive",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (signedInAccount != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                )
                                 Text(
                                     text = signedInAccount?.email ?: "Not connected",
                                     style = MaterialTheme.typography.bodySmall,
@@ -560,6 +551,7 @@ fun SettingsScreen(
                                             coroutineScope.launch {
                                                 isSyncing = true
                                                 syncManager.syncNow(account, repository)
+                                                refreshSnapshots()
                                                 isSyncing = false
                                             }
                                         },
@@ -605,6 +597,7 @@ fun SettingsScreen(
                                             if (success) {
                                                 coroutineScope.launch {
                                                     syncManager.syncNow(signInHelper.getSignedInAccount(), repository)
+                                                    refreshSnapshots()
                                                 }
                                             }
                                         }
@@ -747,11 +740,12 @@ fun SettingsScreen(
                                         triggerStrongTick(context)
                                         WebStore.saveAutoBackup()
                                         coroutineScope.launch {
-                                            val local = WebStore.getAvailableBackups()
-                                            val drive = if (signedInAccount != null) GoogleDriveSync.listDriveRollingBackups() else emptyList<WebStore.BackupInfo>()
-                                            snapshots = local + drive
+                                            if (signedInAccount != null) {
+                                                GoogleDriveSync.createAndUploadRollingBackup()
+                                            }
+                                            refreshSnapshots()
                                         }
-                                        Toast.makeText(context, "Local snapshot saved", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Snapshot saved", Toast.LENGTH_SHORT).show()
                                     },
                                     shape = RoundedCornerShape(8.dp),
                                     color = MaterialTheme.colorScheme.primaryContainer,

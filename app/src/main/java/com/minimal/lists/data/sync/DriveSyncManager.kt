@@ -308,13 +308,14 @@ class DriveSyncManager(private val context: Context) {
             // Prune to keep only 2 newest rolling backups on Drive
             val listResult = drive.files().list()
                 .setSpaces("appDataFolder")
-                .setQ("name contains 'lists_backup_' and trashed = false")
+                .setQ("trashed = false")
                 .setFields("files(id, name, modifiedTime)")
                 .setOrderBy("modifiedTime desc")
-                .setPageSize(10)
+                .setPageSize(20)
                 .execute()
 
-            val backups = listResult.files ?: emptyList()
+            val allFiles = listResult.files ?: emptyList()
+            val backups = allFiles.filter { it.name?.startsWith("lists_backup_") == true }
             if (backups.size > 2) {
                 backups.drop(2).forEach { oldFile ->
                     try {
@@ -334,13 +335,14 @@ class DriveSyncManager(private val context: Context) {
             val drive = getDriveService(account)
             val listResult = drive.files().list()
                 .setSpaces("appDataFolder")
-                .setQ("name contains 'lists_backup_' and trashed = false")
+                .setQ("trashed = false")
                 .setFields("files(id, name, modifiedTime, size)")
                 .setOrderBy("modifiedTime desc")
-                .setPageSize(2)
+                .setPageSize(20)
                 .execute()
 
-            val files = listResult.files ?: emptyList()
+            val allFiles = listResult.files ?: emptyList()
+            val files = allFiles.filter { it.name?.startsWith("lists_backup_") == true }
             files.take(2).mapIndexed { index, file ->
                 val time = file.modifiedTime?.value ?: System.currentTimeMillis()
                 val dateStr = java.text.SimpleDateFormat("MMM d, yyyy · h:mm a", java.util.Locale.getDefault()).format(java.util.Date(time))

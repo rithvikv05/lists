@@ -618,25 +618,12 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = "Google Drive",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (signedInAccount != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                                    )
-                                    if (signedInAccount != null) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(6.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF00E676))
-                                        )
-                                    }
-                                }
+                                Text(
+                                    text = "Google Drive",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (signedInAccount != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                )
                                 Text(
                                     text = signedInAccount?.email ?: "Not connected",
                                     style = MaterialTheme.typography.bodySmall,
@@ -657,6 +644,7 @@ fun SettingsScreen(
                                                 syncManager.syncNow(account, repository)
                                                 rollingBackupManager.captureSnapshot(repository)
                                                 snapshots = rollingBackupManager.listSnapshots()
+                                                driveSnapshots = syncManager.listDriveRollingBackups(account)
                                                 isSyncing = false
                                             }
                                         },

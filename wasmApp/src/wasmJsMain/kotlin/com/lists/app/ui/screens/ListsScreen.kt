@@ -449,11 +449,9 @@ fun ListsScreen(
                                                 )
                                             } else {
                                                 Icon(
-                                                    imageVector = if (!isSystemInDarkTheme()) Icons.Outlined.Cloud else Icons.Default.Cloud,
+                                                    imageVector = if (signedInAccount != null) Icons.Default.Cloud else Icons.Outlined.Cloud,
                                                     contentDescription = "Sync",
-                                                    tint = if (signedInAccount != null) {
-                                                        if (!isSystemInDarkTheme()) MaterialTheme.colorScheme.onSurfaceVariant else Color.White
-                                                    } else MaterialTheme.colorScheme.outlineVariant,
+                                                    tint = if (signedInAccount != null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                                                     modifier = Modifier.size(22.dp)
                                                 )
                                                 if (signedInAccount != null && syncManager.lastSyncTimestamp > 0) {

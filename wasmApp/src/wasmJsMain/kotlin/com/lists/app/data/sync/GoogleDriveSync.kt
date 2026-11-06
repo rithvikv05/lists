@@ -358,7 +358,7 @@ object GoogleDriveSync {
     /**
      * Export merged data as Android-compatible JSON string.
      */
-    private fun exportAndroidFormat(backup: BackupData): String {
+    fun exportAndroidFormat(backup: BackupData): String {
         val root = buildJsonObject {
             put("schemaVersion", 2)
             put("lastModified", backup.exportedAt)
@@ -441,6 +441,17 @@ object GoogleDriveSync {
             println("Sync: Token refresh timeout/exception: ${e.message}")
             null
         }
+    }
+
+    suspend fun getValidToken(): String? {
+        val email = getUserEmail()
+        if (email.isNullOrBlank()) return null
+        var token = accessToken
+        if (token != null && isTokenValid(token)) {
+            return token
+        }
+        token = refreshTokenSilently()
+        return token
     }
 
     suspend fun syncNow(): Boolean {
@@ -651,7 +662,7 @@ object GoogleDriveSync {
      * Upload rolling snapshot to Google Drive appDataFolder and keep only the 2 newest.
      */
     suspend fun uploadDriveRollingBackup(jsonStr: String): Boolean {
-        val token = accessToken ?: return false
+        var token = getValidToken() ?: return false
         return try {
             val boundary = "backup_boundary_123"
             val delimiter = "\r\n--$boundary\r\n"
@@ -662,25 +673,40 @@ object GoogleDriveSync {
             val multipartBody = delimiter + metadata + delimiter +
                     "Content-Type: application/json\r\n\r\n" + jsonStr + closeDelimiter
 
-            val createResp = client.post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart") {
+            var createResp = client.post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart") {
                 header(HttpHeaders.Authorization, "Bearer $token")
                 header("Content-Type", "multipart/related; boundary=\"$boundary\"")
                 setBody(multipartBody)
             }
-            if (createResp.status != HttpStatusCode.OK) return false
+            if (createResp.status == HttpStatusCode.Unauthorized) {
+                val refreshed = refreshTokenSilently()
+                if (refreshed != null) {
+                    token = refreshed
+                    createResp = client.post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart") {
+                        header(HttpHeaders.Authorization, "Bearer $token")
+                        header("Content-Type", "multipart/related; boundary=\"$boundary\"")
+                        setBody(multipartBody)
+                    }
+                }
+            }
+            if (createResp.status != HttpStatusCode.OK && createResp.status != HttpStatusCode.Created) {
+                println("Drive rolling backup create returned ${createResp.status}")
+                return false
+            }
 
             // Prune to keep 2 newest
             val listResp = client.get("https://www.googleapis.com/drive/v3/files") {
                 header(HttpHeaders.Authorization, "Bearer $token")
                 parameter("spaces", "appDataFolder")
-                parameter("q", "name contains 'lists_backup_' and trashed=false")
+                parameter("q", "trashed=false")
                 parameter("fields", "files(id,name,modifiedTime)")
                 parameter("orderBy", "modifiedTime desc")
-                parameter("pageSize", 10)
+                parameter("pageSize", 20)
             }
             if (listResp.status == HttpStatusCode.OK) {
                 val listObj = json.parseToJsonElement(listResp.bodyAsText()).jsonObject
-                val files = listObj["files"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
+                val allFiles = listObj["files"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
+                val files = allFiles.filter { it["name"]?.jsonPrimitive?.contentOrNull?.startsWith("lists_backup_") == true }
                 if (files.size > 2) {
                     files.drop(2).forEach { oldFile ->
                         val oldId = oldFile["id"]?.jsonPrimitive?.contentOrNull
@@ -701,20 +727,40 @@ object GoogleDriveSync {
         }
     }
 
+    suspend fun createAndUploadRollingBackup(): Boolean {
+        val backup = WebStore.createBackup()
+        return uploadDriveRollingBackup(exportAndroidFormat(backup))
+    }
+
     suspend fun listDriveRollingBackups(): List<WebStore.BackupInfo> {
-        val token = accessToken ?: return emptyList()
+        var token = getValidToken() ?: return emptyList()
         return try {
-            val resp = client.get("https://www.googleapis.com/drive/v3/files") {
+            var resp = client.get("https://www.googleapis.com/drive/v3/files") {
                 header(HttpHeaders.Authorization, "Bearer $token")
                 parameter("spaces", "appDataFolder")
-                parameter("q", "name contains 'lists_backup_' and trashed=false")
+                parameter("q", "trashed=false")
                 parameter("fields", "files(id,name,modifiedTime,size)")
                 parameter("orderBy", "modifiedTime desc")
-                parameter("pageSize", 2)
+                parameter("pageSize", 20)
+            }
+            if (resp.status == HttpStatusCode.Unauthorized) {
+                val refreshed = refreshTokenSilently()
+                if (refreshed != null) {
+                    token = refreshed
+                    resp = client.get("https://www.googleapis.com/drive/v3/files") {
+                        header(HttpHeaders.Authorization, "Bearer $token")
+                        parameter("spaces", "appDataFolder")
+                        parameter("q", "trashed=false")
+                        parameter("fields", "files(id,name,modifiedTime,size)")
+                        parameter("orderBy", "modifiedTime desc")
+                        parameter("pageSize", 20)
+                    }
+                }
             }
             if (resp.status == HttpStatusCode.OK) {
                 val obj = json.parseToJsonElement(resp.bodyAsText()).jsonObject
-                val files = obj["files"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
+                val allFiles = obj["files"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
+                val files = allFiles.filter { it["name"]?.jsonPrimitive?.contentOrNull?.startsWith("lists_backup_") == true }
                 files.take(2).mapIndexed { idx, file ->
                     val fileId = file["id"]?.jsonPrimitive?.contentOrNull ?: ""
                     val modTimeStr = file["modifiedTime"]?.jsonPrimitive?.contentOrNull ?: ""
@@ -735,17 +781,30 @@ object GoogleDriveSync {
                         driveFileId = fileId
                     )
                 }
-            } else emptyList()
+            } else {
+                println("listDriveRollingBackups returned ${resp.status}")
+                emptyList()
+            }
         } catch (e: Exception) {
+            println("listDriveRollingBackups error: ${e.message}")
             emptyList()
         }
     }
 
     suspend fun restoreDriveRollingBackup(fileId: String): Boolean {
-        val token = accessToken ?: return false
+        var token = getValidToken() ?: return false
         return try {
-            val resp = client.get("https://www.googleapis.com/drive/v3/files/$fileId?alt=media") {
+            var resp = client.get("https://www.googleapis.com/drive/v3/files/$fileId?alt=media") {
                 header(HttpHeaders.Authorization, "Bearer $token")
+            }
+            if (resp.status == HttpStatusCode.Unauthorized) {
+                val refreshed = refreshTokenSilently()
+                if (refreshed != null) {
+                    token = refreshed
+                    resp = client.get("https://www.googleapis.com/drive/v3/files/$fileId?alt=media") {
+                        header(HttpHeaders.Authorization, "Bearer $token")
+                    }
+                }
             }
             if (resp.status == HttpStatusCode.OK) {
                 val jsonStr = resp.bodyAsText()

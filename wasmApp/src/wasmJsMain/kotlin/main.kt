@@ -232,11 +232,9 @@ fun main() {
                                                     val isSynced = (lastSyncTime ?: 0L) > 0 || (GoogleDriveSync.getLastSyncTime() ?: 0L) > 0
                                                     Box(contentAlignment = Alignment.Center) {
                                                         Icon(
-                                                            imageVector = if (!darkTheme) Icons.Outlined.Cloud else Icons.Default.Cloud,
+                                                            imageVector = if (isConnected) Icons.Default.Cloud else Icons.Outlined.Cloud,
                                                             contentDescription = "Sync",
-                                                            tint = if (isConnected) {
-                                                                if (!darkTheme) MaterialTheme.colorScheme.onSurfaceVariant else Color.White
-                                                            } else MaterialTheme.colorScheme.outlineVariant
+                                                            tint = if (isConnected) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                                                         )
                                                         if (isConnected && isSynced) {
                                                             Box(
