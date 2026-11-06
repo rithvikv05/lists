@@ -299,25 +299,33 @@ fun ListDetailScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = {
-                                triggerStrongTick(context)
-                                selectedItemIds = emptySet()
-                            }) {
-                                Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurface)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    triggerStrongTick(context)
+                                    selectedItemIds = emptySet()
+                                },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(20.dp))
                             }
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(2.dp))
                             Text(
                                 text = "${selectedItemIds.size} selected",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(1.dp)
                         ) {
                             val selectedItems = filteredItems.filter { selectedItemIds.contains(it.id) }
                             val anyUnmarked = selectedItems.any { !it.marked }
@@ -325,65 +333,83 @@ fun ListDetailScreen(
 
                             // Edit Item (visible when exactly 1 item is selected)
                             if (selectedItemIds.size == 1) {
-                                IconButton(onClick = {
-                                    triggerStrongTick(context)
-                                    val item = selectedItems.firstOrNull()
-                                    if (item != null) {
-                                        itemToEdit = item
-                                        selectedItemIds = emptySet()
-                                    }
-                                }) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Edit Item", tint = MaterialTheme.colorScheme.primary)
+                                IconButton(
+                                    onClick = {
+                                        triggerStrongTick(context)
+                                        val item = selectedItems.firstOrNull()
+                                        if (item != null) {
+                                            itemToEdit = item
+                                            selectedItemIds = emptySet()
+                                        }
+                                    },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Edit Item", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp))
                                 }
                             }
 
                             // Select All
-                            IconButton(onClick = {
-                                triggerAsmrTick(context)
-                                selectedItemIds = if (selectedItemIds.size == filteredItems.size) emptySet() else filteredItems.map { it.id }.toSet()
-                            }) {
-                                Icon(Icons.Default.SelectAll, contentDescription = "Select All", tint = MaterialTheme.colorScheme.onSurface)
+                            IconButton(
+                                onClick = {
+                                    triggerAsmrTick(context)
+                                    selectedItemIds = if (selectedItemIds.size == filteredItems.size) emptySet() else filteredItems.map { it.id }.toSet()
+                                },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(Icons.Default.SelectAll, contentDescription = "Select All", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(19.dp))
                             }
 
                             // Bulk Mark / Unmark
-                            IconButton(onClick = {
-                                triggerStrongTick(context)
-                                scope.launch {
-                                    repository.setItemsMarked(selectedItems, anyUnmarked)
-                                    selectedItemIds = emptySet()
-                                }
-                            }) {
+                            IconButton(
+                                onClick = {
+                                    triggerStrongTick(context)
+                                    scope.launch {
+                                        repository.setItemsMarked(selectedItems, anyUnmarked)
+                                        selectedItemIds = emptySet()
+                                    }
+                                },
+                                modifier = Modifier.size(34.dp)
+                            ) {
                                 Icon(
                                     imageVector = if (anyUnmarked) Icons.Default.CheckCircle else Icons.Default.Check,
                                     contentDescription = if (anyUnmarked) "Mark $completedLabel" else "Unmark $completedLabel",
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(19.dp)
                                 )
                             }
 
                             // Bulk Pin / Unpin
-                            IconButton(onClick = {
-                                triggerStrongTick(context)
-                                scope.launch {
-                                    repository.setItemsPinned(selectedItems, anyUnpinned)
-                                    selectedItemIds = emptySet()
-                                }
-                            }) {
+                            IconButton(
+                                onClick = {
+                                    triggerStrongTick(context)
+                                    scope.launch {
+                                        repository.setItemsPinned(selectedItems, anyUnpinned)
+                                        selectedItemIds = emptySet()
+                                    }
+                                },
+                                modifier = Modifier.size(34.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.PushPin,
                                     contentDescription = if (anyUnpinned) "Pin" else "Unpin",
-                                    tint = if (anyUnpinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                    tint = if (anyUnpinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(19.dp)
                                 )
                             }
 
                             // Bulk Delete
-                            IconButton(onClick = {
-                                triggerStrongTick(context)
-                                showBulkDeleteDialog = true
-                            }) {
+                            IconButton(
+                                onClick = {
+                                    triggerStrongTick(context)
+                                    showBulkDeleteDialog = true
+                                },
+                                modifier = Modifier.size(34.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.Delete,
                                     contentDescription = "Delete",
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(19.dp)
                                 )
                             }
                         }

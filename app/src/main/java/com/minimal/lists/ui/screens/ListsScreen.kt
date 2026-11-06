@@ -274,17 +274,11 @@ fun ListsScreen(
             }
         }
     ) { padding ->
-        PullToRefreshBox(
-            isRefreshing = isRefreshing,
-            onRefresh = onPullRefresh,
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(
+                .then(
                         if (showSearchBar) {
                             Modifier.clickable(
                                 interactionSource = remember { MutableInteractionSource() },
@@ -618,101 +612,102 @@ fun ListsScreen(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // DUAL LAYOUT MODES: Discrete 1 vs Bento Grid (Big rectangular boxes, 2D minimal, long-press to manage)
-                if (displayedLists.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (searchQuery.isNotBlank()) "No matching lists found" else "No lists yet. Tap 'New List' to create one.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.outline
-                        )
-                    }
-                } else if (homeLayoutMode == HomeLayoutMode.DISCRETE) {
-                    // MODE 1: Discrete 1 Vertical Flat Minimal List (Stitch Screen #11)
-                    LazyColumn(
-                        state = listState,
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(bottom = 96.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                    ) {
-                        items(displayedLists, key = { it.list.id }) { listWithStats ->
-                            val cat = Category.fromId(listWithStats.list.category)
-                            val isSelected = selectedListIds.contains(listWithStats.list.id)
-                            val inSelectionMode = selectedListIds.isNotEmpty()
-                            DiscreteListCard(
-                                title = listWithStats.list.name,
-                                category = cat,
-                                itemCount = listWithStats.itemCount,
-                                completedCount = listWithStats.completedCount,
-                                isPinned = listWithStats.list.pinned,
-                                selected = isSelected,
-                                selectionMode = inSelectionMode,
-                                onClick = {
-                                    if (inSelectionMode) {
-                                        triggerAsmrTick(context)
-                                        selectedListIds = if (isSelected) selectedListIds - listWithStats.list.id else selectedListIds + listWithStats.list.id
-                                    } else {
-                                        openList(listWithStats.list.id)
-                                    }
-                                },
-                                onLongClick = {
-                                    triggerStrongTick(context)
-                                    selectedListIds = if (isSelected) selectedListIds - listWithStats.list.id else selectedListIds + listWithStats.list.id
-                                }
+                // Pull-to-refresh container for list content
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = onPullRefresh,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    if (displayedLists.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (searchQuery.isNotBlank()) "No matching lists found" else "No lists yet. Tap 'New List' to create one.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.outline
                             )
                         }
-                    }
-                } else {
-                    // MODE 2: Bento Grid 2/4-Column Collections (Big rectangular boxes matching Stitch photo)
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(gridColumns),
-                        state = gridState,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(bottom = 96.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                    ) {
-                        items(displayedLists, key = { it.list.id }) { listWithStats ->
-                            val cat = Category.fromId(listWithStats.list.category)
-                            val isSelected = selectedListIds.contains(listWithStats.list.id)
-                            val inSelectionMode = selectedListIds.isNotEmpty()
-                            BentoCollectionCard(
-                                title = listWithStats.list.name,
-                                category = cat,
-                                itemCount = listWithStats.itemCount,
-                                completedCount = listWithStats.completedCount,
-                                isPinned = listWithStats.list.pinned,
-                                selected = isSelected,
-                                selectionMode = inSelectionMode,
-                                onClick = {
-                                    if (inSelectionMode) {
-                                        triggerAsmrTick(context)
+                    } else if (homeLayoutMode == HomeLayoutMode.DISCRETE) {
+                        // MODE 1: Discrete 1 Vertical Flat Minimal List (Stitch Screen #11)
+                        LazyColumn(
+                            state = listState,
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(bottom = 96.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(displayedLists, key = { it.list.id }) { listWithStats ->
+                                val cat = Category.fromId(listWithStats.list.category)
+                                val isSelected = selectedListIds.contains(listWithStats.list.id)
+                                val inSelectionMode = selectedListIds.isNotEmpty()
+                                DiscreteListCard(
+                                    title = listWithStats.list.name,
+                                    category = cat,
+                                    itemCount = listWithStats.itemCount,
+                                    completedCount = listWithStats.completedCount,
+                                    isPinned = listWithStats.list.pinned,
+                                    selected = isSelected,
+                                    selectionMode = inSelectionMode,
+                                    onClick = {
+                                        if (inSelectionMode) {
+                                            triggerAsmrTick(context)
+                                            selectedListIds = if (isSelected) selectedListIds - listWithStats.list.id else selectedListIds + listWithStats.list.id
+                                        } else {
+                                            openList(listWithStats.list.id)
+                                        }
+                                    },
+                                    onLongClick = {
+                                        triggerStrongTick(context)
                                         selectedListIds = if (isSelected) selectedListIds - listWithStats.list.id else selectedListIds + listWithStats.list.id
-                                    } else {
-                                        openList(listWithStats.list.id)
                                     }
-                                },
-                                onLongClick = {
-                                    triggerStrongTick(context)
-                                    selectedListIds = if (isSelected) selectedListIds - listWithStats.list.id else selectedListIds + listWithStats.list.id
-                                }
-                            )
+                                )
+                            }
+                        }
+                    } else {
+                        // MODE 2: Bento Grid 2/4-Column Collections (Big rectangular boxes matching Stitch photo)
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(gridColumns),
+                            state = gridState,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(bottom = 96.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(displayedLists, key = { it.list.id }) { listWithStats ->
+                                val cat = Category.fromId(listWithStats.list.category)
+                                val isSelected = selectedListIds.contains(listWithStats.list.id)
+                                val inSelectionMode = selectedListIds.isNotEmpty()
+                                BentoCollectionCard(
+                                    title = listWithStats.list.name,
+                                    category = cat,
+                                    itemCount = listWithStats.itemCount,
+                                    completedCount = listWithStats.completedCount,
+                                    isPinned = listWithStats.list.pinned,
+                                    selected = isSelected,
+                                    selectionMode = inSelectionMode,
+                                    onClick = {
+                                        if (inSelectionMode) {
+                                            triggerAsmrTick(context)
+                                            selectedListIds = if (isSelected) selectedListIds - listWithStats.list.id else selectedListIds + listWithStats.list.id
+                                        } else {
+                                            openList(listWithStats.list.id)
+                                        }
+                                    },
+                                    onLongClick = {
+                                        triggerStrongTick(context)
+                                        selectedListIds = if (isSelected) selectedListIds - listWithStats.list.id else selectedListIds + listWithStats.list.id
+                                    }
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     }
-}
 }
 
     // Scalable Category Selector Modal (Stitch #00 & #06)
