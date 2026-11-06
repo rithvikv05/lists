@@ -10,6 +10,7 @@ wasmApp/build/
 local.properties
 *.apk
 *.xapk
+*.idsig
 
 # Secrets and environment files
 .env

@@ -344,12 +344,10 @@ fun Material3CircularProgressIndicator(
 fun getItemProgressPercentage(item: ListItem, category: Category? = null): Int? {
     val effectiveCat = category ?: runCatching { Category.fromId(item.category) }.getOrNull()
 
-    // 1. Exclude movies, games, board games, podcasts, music entirely from progress rings
+    // 1. Exclude movies, games, board games entirely from progress rings
     if (effectiveCat == Category.MOVIE ||
         effectiveCat == Category.GAME ||
-        effectiveCat == Category.BOARD_GAME ||
-        effectiveCat == Category.PODCAST ||
-        effectiveCat == Category.MUSIC) {
+        effectiveCat == Category.BOARD_GAME) {
         return null
     }
 
@@ -441,7 +439,7 @@ fun DiscreteListCard(
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = cardBg,
-        shadowElevation = if (selected) 0.dp else 1.5.dp,
+        shadowElevation = 0.dp,
         border = if (selected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = modifier
             .fillMaxWidth()
@@ -578,7 +576,7 @@ fun BentoCollectionCard(
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = cardBg,
-        shadowElevation = if (selected) 0.dp else 1.5.dp,
+        shadowElevation = 0.dp,
         border = if (selected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = modifier
             .fillMaxWidth()
@@ -963,11 +961,12 @@ fun ScalableCategoryModal(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NewListModal(
+    initialCategory: Category = Category.MOVIE,
     onDismiss: () -> Unit,
     onCreate: (name: String, category: Category) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf(Category.MOVIE) }
+    var selectedCategory by remember(initialCategory) { mutableStateOf(initialCategory) }
     var dropdownExpanded by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val dropdownListState = rememberLazyListState()
@@ -1009,7 +1008,7 @@ fun NewListModal(
             // List Name input
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = "List Name",
+                    text = "Name your list...",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1019,7 +1018,7 @@ fun NewListModal(
                     onValueChange = { name = it },
                     placeholder = {
                         Text(
-                            text = "e.g. Cyberpunk Books 2025",
+                            text = "List Name",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.outline
                         )
@@ -1500,7 +1499,7 @@ fun GridMediaCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(4.dp)
+                .padding(vertical = 4.dp)
         ) {
             Box(
                 modifier = Modifier

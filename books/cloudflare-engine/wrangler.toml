@@ -1,0 +1,9 @@
+name = "books-cloud-engine"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENVIRONMENT = "production"
+GOOGLE_BOOKS_API_KEY = "AIzaSyA0VwxRvK4yPxj29t2mlkB92wRrdp2Em04"
+

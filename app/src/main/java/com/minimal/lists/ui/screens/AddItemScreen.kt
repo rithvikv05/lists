@@ -24,7 +24,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -92,6 +94,10 @@ fun AddItemScreen(
 
     var bookSearchType by remember { mutableStateOf(BookSearchType.ALL) }
     var isBookSearchTypeMenuOpen by remember { mutableStateOf(false) }
+    var showBarcodeScanner by remember { mutableStateOf(false) }
+    var showManualBookDialog by remember { mutableStateOf(false) }
+    var manualEntryPrefillTitle by remember { mutableStateOf("") }
+    var manualEntryPrefillIsbn by remember { mutableStateOf("") }
 
     val yearOptions = remember {
         listOf("All", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2015", "2010", "2000s", "1990s")
@@ -294,10 +300,36 @@ fun AddItemScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 10.dp, bottom = 12.dp),
+                        .padding(top = 8.dp, bottom = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Small square Barcode Scanner icon button for Books
+                    if (activeCategory == Category.BOOK) {
+                        Surface(
+                            onClick = {
+                                triggerStrongTick(context)
+                                showBarcodeScanner = true
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                            ),
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.QrCodeScanner,
+                                    contentDescription = "Scan Barcode",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
                     // 1. Year Filter (All categories)
                     val isYearActive = selectedYear != null
                     Box {
@@ -484,10 +516,16 @@ fun AddItemScreen(
                             Surface(
                                 onClick = {
                                     triggerStrongTick(context)
-                                    scope.launch {
-                                        repository.addCustomItem(listId, searchQuery.trim(), activeCategory.id)
-                                        snackbarHostState.showSnackbar("Added “${searchQuery.trim()}”")
-                                        searchQuery = ""
+                                    if (activeCategory == Category.BOOK) {
+                                        manualEntryPrefillTitle = searchQuery.trim()
+                                        manualEntryPrefillIsbn = ""
+                                        showManualBookDialog = true
+                                    } else {
+                                        scope.launch {
+                                            repository.addCustomItem(listId, searchQuery.trim(), activeCategory.id)
+                                            snackbarHostState.showSnackbar("Added “${searchQuery.trim()}”")
+                                            searchQuery = ""
+                                        }
                                     }
                                 },
                                 shape = RoundedCornerShape(14.dp),
@@ -607,7 +645,8 @@ fun AddItemScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
 
-                                    val subtitle = listOf(result.creator, result.releaseYear)
+                                    val pageInfo = if (result.totalPages > 0) "${result.totalPages}p" else ""
+                                    val subtitle = listOf(result.creator, result.releaseYear, pageInfo)
                                         .filter { it.isNotBlank() }
                                         .joinToString(" · ")
 
@@ -794,6 +833,57 @@ fun AddItemScreen(
                 }
             },
             onDismiss = { showCategoryModal = false }
+        )
+    }
+
+    if (showBarcodeScanner) {
+        BookBarcodeScannerModal(
+            onDismiss = { showBarcodeScanner = false },
+            onBarcodeDetected = { barcode ->
+                showBarcodeScanner = false
+                scope.launch {
+                    val searchRepo = SearchRepository()
+                    val result = searchRepo.lookupBookByIsbn(barcode)
+                    if (result != null) {
+                        repository.addItemFromSearch(listId, result)
+                        snackbarHostState.showSnackbar("Added “${result.title}”")
+                    } else {
+                        snackbarHostState.showSnackbar("ISBN not found. Try searching or enter manually.")
+                    }
+                }
+            }
+        )
+    }
+
+    if (showManualBookDialog) {
+        ManualBookEntryDialog(
+            initialTitle = manualEntryPrefillTitle,
+            initialIsbn = manualEntryPrefillIsbn,
+            onDismiss = {
+                showManualBookDialog = false
+                manualEntryPrefillTitle = ""
+                manualEntryPrefillIsbn = ""
+            },
+            onSave = { title, author, isbn, totalPages, language, publisher, publishDate, coverUrl ->
+                showManualBookDialog = false
+                manualEntryPrefillTitle = ""
+                manualEntryPrefillIsbn = ""
+                scope.launch {
+                    repository.addManualBookItem(
+                        listId = listId,
+                        title = title,
+                        author = author,
+                        isbn = isbn,
+                        totalPages = totalPages,
+                        language = language,
+                        publisher = publisher,
+                        publishDate = publishDate,
+                        coverUrl = coverUrl
+                    )
+                    snackbarHostState.showSnackbar("Added “$title”")
+                    searchQuery = ""
+                }
+            }
         )
     }
 }

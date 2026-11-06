@@ -359,7 +359,8 @@ class SearchRepository {
 
             if (cleanKey.isBlank()) continue
             val yearDigits = item.releaseYear.filter { it.isDigit() }.take(4)
-            val key = if (yearDigits.isNotBlank()) "$cleanKey#$yearDigits" else cleanKey
+            val isBookType = item.category == Category.BOOK || item.category == Category.MANGA || item.category == Category.COMIC
+            val key = if (isBookType) cleanKey else (if (yearDigits.isNotBlank()) "$cleanKey#$yearDigits" else cleanKey)
 
             val enhancedCover = enhanceCoverUrl(item.coverUrl)
             val cleanedItem = item.copy(title = canonicalTitle, coverUrl = enhancedCover)
@@ -374,7 +375,10 @@ class SearchRepository {
                 val betterCreator = if (existing.creator.isBlank() && cleanedItem.creator.isNotBlank()) cleanedItem.creator else existing.creator
                 val betterExtUrl = if (existing.externalUrl.isBlank() && cleanedItem.externalUrl.isNotBlank()) cleanedItem.externalUrl else existing.externalUrl
                 val betterEps = if (existing.totalEpisodes <= 0 && cleanedItem.totalEpisodes > 0) cleanedItem.totalEpisodes else existing.totalEpisodes
-                val betterPages = if (existing.totalPages <= 0 && cleanedItem.totalPages > 0) cleanedItem.totalPages else existing.totalPages
+                val betterPages = maxOf(existing.totalPages, cleanedItem.totalPages)
+                val betterIsbn = if (existing.isbn.isBlank() && cleanedItem.isbn.isNotBlank()) cleanedItem.isbn else existing.isbn
+                val betterPublisher = if (existing.publisher.isBlank() && cleanedItem.publisher.isNotBlank()) cleanedItem.publisher else existing.publisher
+                val betterLanguage = if (existing.language.isBlank() && cleanedItem.language.isNotBlank()) cleanedItem.language else existing.language
 
                 map[key] = existing.copy(
                     coverUrl = betterCover,
@@ -383,7 +387,10 @@ class SearchRepository {
                     creator = betterCreator,
                     externalUrl = betterExtUrl,
                     totalEpisodes = betterEps,
-                    totalPages = betterPages
+                    totalPages = betterPages,
+                    isbn = betterIsbn,
+                    publisher = betterPublisher,
+                    language = betterLanguage
                 )
             }
         }
@@ -454,7 +461,6 @@ class SearchRepository {
                         Category.COMIC -> searchBooks(searchCleanQuery, BookSubFilter.COMICS, bookSearchType)
                         Category.GAME -> searchGames(searchCleanQuery)
                         Category.BOARD_GAME -> searchBoardGames(searchCleanQuery)
-                        Category.PODCAST, Category.MUSIC -> searchWikipedia(searchCleanQuery, category)
                     }
                 } catch (e: Exception) {
                     println("Search error: ${e.message}")
@@ -653,14 +659,208 @@ class SearchRepository {
     }
 
 
+    suspend fun searchBooksViaCloudEngine(query: String, searchType: BookSearchType): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        try {
+            val term = encodeURIComponent(query.trim())
+            val typeParam = when (searchType) {
+                BookSearchType.TITLE -> "&type=title"
+                BookSearchType.AUTHOR -> "&type=author"
+                BookSearchType.ALL -> ""
+            }
+            val url = "https://books-cloud-engine.minimal-lists.workers.dev/api/v1/books/search?q=$term$typeParam"
+            val response = client.get(url).bodyAsText()
+            val root = json.parseToJsonElement(response).jsonObject
+            val arr = root["results"]?.jsonArray ?: return results
+            for (elem in arr) {
+                val obj = elem.jsonObject
+                val title = obj["title"]?.jsonPrimitive?.contentOrNull ?: continue
+                if (title.isBlank()) continue
+                val authorsArr = obj["authors"]?.jsonArray
+                val authors = authorsArr?.mapNotNull { it.jsonPrimitive.contentOrNull }?.joinToString(", ") ?: ""
+                val primaryAuthor = obj["primaryAuthor"]?.jsonPrimitive?.contentOrNull ?: authors
+                val isbn = obj["primaryIsbn"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["isbn13"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["isbn10"]?.jsonPrimitive?.contentOrNull
+                    ?: ""
+                val coverUrl = obj["coverUrl"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["thumbnailCoverUrl"]?.jsonPrimitive?.contentOrNull
+                    ?: ""
+                val year = obj["publishedYear"]?.jsonPrimitive?.contentOrNull ?: ""
+                val date = obj["publishedDate"]?.jsonPrimitive?.contentOrNull ?: ""
+                val pages = obj["totalPages"]?.jsonPrimitive?.intOrNull ?: 0
+                val publisher = obj["publisher"]?.jsonPrimitive?.contentOrNull ?: ""
+                val lang = obj["language"]?.jsonPrimitive?.contentOrNull ?: ""
+                val overview = obj["overview"]?.jsonPrimitive?.contentOrNull ?: ""
+                val rating = obj["rating"]?.jsonPrimitive?.doubleOrNull?.toFloat() ?: 0f
+                val extUrl = obj["externalUrl"]?.jsonPrimitive?.contentOrNull ?: ""
+
+                results.add(
+                    SearchResult(
+                        title = title,
+                        originalTitle = obj["subtitle"]?.jsonPrimitive?.contentOrNull ?: "",
+                        creator = primaryAuthor,
+                        coverUrl = coverUrl,
+                        releaseYear = year,
+                        releaseDate = date,
+                        totalPages = pages,
+                        overview = overview,
+                        rating = rating,
+                        category = Category.BOOK,
+                        externalUrl = extUrl,
+                        isbn = isbn,
+                        publisher = publisher,
+                        language = lang
+                    )
+                )
+            }
+        } catch (_: Throwable) {}
+        return results
+    }
+
+    suspend fun resolveBookPages(title: String, creator: String = "", isbn: String = ""): Int {
+        val cleanIsbn = isbn.replace("-", "").trim()
+        if (cleanIsbn.isNotBlank()) {
+            try {
+                val url = "https://books-cloud-engine.minimal-lists.workers.dev/api/v1/books/isbn/$cleanIsbn"
+                val response = client.get(url).bodyAsText()
+                val root = json.parseToJsonElement(response).jsonObject
+                if (root["success"]?.jsonPrimitive?.booleanOrNull == true) {
+                    val book = root["book"]?.jsonObject
+                    val pages = book?.get("totalPages")?.jsonPrimitive?.intOrNull ?: 0
+                    if (pages > 0) return pages
+                }
+            } catch (_: Throwable) {}
+        }
+
+        try {
+            val cleanTitle = cleanCanonicalTitle(title).trim()
+            val cleanAuthor = creator.split(",", "/").firstOrNull()?.trim() ?: ""
+            val q = if (cleanAuthor.isNotBlank()) "intitle:\"$cleanTitle\" inauthor:\"$cleanAuthor\"" else "intitle:\"$cleanTitle\""
+            val encoded = encodeURIComponent(q)
+            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=5&key=AIzaSyA0VwxRvK4yPxj29t2mlkB92wRrdp2Em04"
+            val response = client.get(url).bodyAsText()
+            val root = json.parseToJsonElement(response).jsonObject
+            val items = root["items"]?.jsonArray
+            if (items != null) {
+                for (elem in items) {
+                    val vol = elem.jsonObject["volumeInfo"]?.jsonObject ?: continue
+                    val pages = vol["pageCount"]?.jsonPrimitive?.intOrNull
+                        ?: vol["printedPageCount"]?.jsonPrimitive?.intOrNull ?: 0
+                    if (pages > 0) return pages
+                }
+            }
+        } catch (_: Throwable) {}
+
+        try {
+            val encoded = encodeURIComponent(title.trim())
+            val url = "https://openlibrary.org/search.json?q=$encoded&fields=number_of_pages_median,number_of_pages&limit=5"
+            val response = client.get(url).bodyAsText()
+            val root = json.parseToJsonElement(response).jsonObject
+            val docs = root["docs"]?.jsonArray
+            if (docs != null) {
+                for (elem in docs) {
+                    val doc = elem.jsonObject
+                    val pages = doc["number_of_pages_median"]?.jsonPrimitive?.intOrNull
+                        ?: doc["number_of_pages"]?.jsonPrimitive?.intOrNull ?: 0
+                    if (pages > 0) return pages
+                }
+            }
+        } catch (_: Throwable) {}
+
+        return 0
+    }
+
     private suspend fun searchBooks(query: String, filter: BookSubFilter, searchType: BookSearchType): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
         val term = encodeURIComponent(query)
 
         if (filter == BookSubFilter.ALL || filter == BookSubFilter.BOOKS) {
-            // 1. Primary: Apple Books (ultra fast, high quality 1200x1200bb covers)
+            // 1. Primary: Cloudflare Book Engine
+            val cloudResults = searchBooksViaCloudEngine(query, searchType)
+            results.addAll(cloudResults)
+
+            // 2. Google Books (with API key)
             try {
-                val appleUrl = "https://itunes.apple.com/search?term=$term&entity=ebook&limit=25"
+                val prefix = when (searchType) {
+                    BookSearchType.TITLE -> "intitle:"
+                    BookSearchType.AUTHOR -> "inauthor:"
+                    BookSearchType.ALL -> ""
+                }
+                val url = "https://www.googleapis.com/books/v1/volumes?q=${prefix}$term&maxResults=20&key=AIzaSyA0VwxRvK4yPxj29t2mlkB92wRrdp2Em04"
+                val response = client.get(url).bodyAsText()
+                val root = json.parseToJsonElement(response).jsonObject
+                val items = root["items"]?.jsonArray
+
+                if (items != null) {
+                    for (elem in items) {
+                        val info = elem.jsonObject["volumeInfo"]?.jsonObject ?: continue
+                        val title = info["title"]?.jsonPrimitive?.content ?: continue
+                        val authors = info["authors"]?.jsonArray?.map { it.jsonPrimitive.content }?.joinToString(", ") ?: ""
+                        val publishedDate = info["publishedDate"]?.jsonPrimitive?.content ?: ""
+                        val releaseYear = if (publishedDate.length >= 4) publishedDate.substring(0, 4) else ""
+                        val imageLinks = info["imageLinks"]?.jsonObject
+                        val rawCover = imageLinks?.get("thumbnail")?.jsonPrimitive?.content ?: ""
+                        val coverUrl = rawCover.replace("http://", "https://").replace("&edge=curl", "").replace("zoom=1", "zoom=3")
+                        val overview = info["description"]?.jsonPrimitive?.content ?: ""
+                        val pageCount = info["pageCount"]?.jsonPrimitive?.intOrNull ?: (info["printedPageCount"]?.jsonPrimitive?.intOrNull ?: 0)
+                        val previewLink = info["previewLink"]?.jsonPrimitive?.content ?: ""
+
+                        results.add(
+                            SearchResult(
+                                title = title,
+                                releaseYear = releaseYear,
+                                releaseDate = publishedDate,
+                                creator = authors,
+                                overview = overview,
+                                coverUrl = coverUrl,
+                                category = Category.BOOK,
+                                externalUrl = previewLink,
+                                totalPages = pageCount
+                            )
+                        )
+                    }
+                }
+            } catch (_: Throwable) {}
+
+            // 3. OpenLibrary Search (with fields parameter)
+            try {
+                val fieldsParam = "&fields=key,title,subtitle,author_name,isbn,number_of_pages_median,number_of_pages,cover_i,publisher,first_publish_year,subject,ratings_average"
+                val olUrl = "https://openlibrary.org/search.json?q=$term&limit=20$fieldsParam"
+                val response = client.get(olUrl).bodyAsText()
+                val root = json.parseToJsonElement(response).jsonObject
+                val docs = root["docs"]?.jsonArray
+                docs?.forEach { elem ->
+                    val obj = elem.jsonObject
+                    val title = obj["title"]?.jsonPrimitive?.content ?: return@forEach
+                    val authors = obj["author_name"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }?.joinToString(", ") ?: ""
+                    val firstYear = obj["first_publish_year"]?.jsonPrimitive?.contentOrNull ?: ""
+                    val coverI = obj["cover_i"]?.jsonPrimitive?.contentOrNull
+                    val coverUrl = if (coverI != null) "https://covers.openlibrary.org/b/id/$coverI-L.jpg" else ""
+                    val key = obj["key"]?.jsonPrimitive?.content ?: ""
+                    val pages = obj["number_of_pages_median"]?.jsonPrimitive?.intOrNull
+                        ?: obj["number_of_pages"]?.jsonPrimitive?.intOrNull ?: 0
+                    val publisher = obj["publisher"]?.jsonArray?.firstOrNull()?.jsonPrimitive?.contentOrNull ?: ""
+
+                    results.add(
+                        SearchResult(
+                            title = title,
+                            releaseYear = firstYear,
+                            releaseDate = firstYear,
+                            creator = authors,
+                            coverUrl = coverUrl,
+                            category = Category.BOOK,
+                            externalUrl = if (key.isNotEmpty()) "https://openlibrary.org$key" else "",
+                            totalPages = pages,
+                            publisher = publisher
+                        )
+                    )
+                }
+            } catch (_: Throwable) {}
+
+            // 4. Apple Books
+            try {
+                val appleUrl = "https://itunes.apple.com/search?term=$term&entity=ebook&limit=15"
                 val response = client.get(appleUrl).bodyAsText()
                 val root = json.parseToJsonElement(response).jsonObject
                 val items = root["results"]?.jsonArray
@@ -690,80 +890,6 @@ class SearchRepository {
                             externalUrl = viewUrl
                         )
                     )
-                }
-            } catch (_: Throwable) {}
-
-            // 2. Backup: OpenLibrary Search
-            try {
-                val olUrl = "https://openlibrary.org/search.json?q=$term&limit=20"
-                val response = client.get(olUrl).bodyAsText()
-                val root = json.parseToJsonElement(response).jsonObject
-                val docs = root["docs"]?.jsonArray
-                docs?.forEach { elem ->
-                    val obj = elem.jsonObject
-                    val title = obj["title"]?.jsonPrimitive?.content ?: return@forEach
-                    val authors = obj["author_name"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }?.joinToString(", ") ?: ""
-                    val firstYear = obj["first_publish_year"]?.jsonPrimitive?.contentOrNull ?: ""
-                    val coverI = obj["cover_i"]?.jsonPrimitive?.contentOrNull
-                    val coverUrl = if (coverI != null) "https://covers.openlibrary.org/b/id/$coverI-L.jpg" else ""
-                    val key = obj["key"]?.jsonPrimitive?.content ?: ""
-
-                    results.add(
-                        SearchResult(
-                            title = title,
-                            releaseYear = firstYear,
-                            releaseDate = firstYear,
-                            creator = authors,
-                            coverUrl = coverUrl,
-                            category = Category.BOOK,
-                            externalUrl = if (key.isNotEmpty()) "https://openlibrary.org$key" else ""
-                        )
-                    )
-                }
-            } catch (e: Throwable) {
-                println("OpenLibrary error: ${e.message}")
-            }
-
-            // 3. Fallback: Google Books
-            try {
-                val prefix = when (searchType) {
-                    BookSearchType.TITLE -> "intitle:"
-                    BookSearchType.AUTHOR -> "inauthor:"
-                    BookSearchType.ALL -> ""
-                }
-                val url = "https://www.googleapis.com/books/v1/volumes?q=${prefix}$term&maxResults=15"
-                val response = client.get(url).bodyAsText()
-                val root = json.parseToJsonElement(response).jsonObject
-                val items = root["items"]?.jsonArray
-
-                if (items != null) {
-                    for (elem in items) {
-                        val info = elem.jsonObject["volumeInfo"]?.jsonObject ?: continue
-                        val title = info["title"]?.jsonPrimitive?.content ?: continue
-                        val authors = info["authors"]?.jsonArray?.map { it.jsonPrimitive.content }?.joinToString(", ") ?: ""
-                        val publishedDate = info["publishedDate"]?.jsonPrimitive?.content ?: ""
-                        val releaseYear = if (publishedDate.length >= 4) publishedDate.substring(0, 4) else ""
-                        val imageLinks = info["imageLinks"]?.jsonObject
-                        val rawCover = imageLinks?.get("thumbnail")?.jsonPrimitive?.content ?: ""
-                        val coverUrl = rawCover.replace("http://", "https://").replace("&edge=curl", "").replace("zoom=1", "zoom=3")
-                        val overview = info["description"]?.jsonPrimitive?.content ?: ""
-                        val pageCount = info["pageCount"]?.jsonPrimitive?.intOrNull ?: 0
-                        val previewLink = info["previewLink"]?.jsonPrimitive?.content ?: ""
-
-                        results.add(
-                            SearchResult(
-                                title = title,
-                                releaseYear = releaseYear,
-                                releaseDate = publishedDate,
-                                creator = authors,
-                                overview = overview,
-                                coverUrl = coverUrl,
-                                category = Category.BOOK,
-                                externalUrl = previewLink,
-                                totalPages = pageCount
-                            )
-                        )
-                    }
                 }
             } catch (_: Throwable) {}
         }
@@ -996,8 +1122,6 @@ class SearchRepository {
                 Category.MANGA -> " manga"
                 Category.COMIC -> " comic"
                 Category.BOARD_GAME -> " board game"
-                Category.PODCAST -> " podcast"
-                Category.MUSIC -> " album"
             }
             val searchQuery = if (query.endsWith(suffix, ignoreCase = true)) query else "$query$suffix"
             val encoded = encodeURIComponent(searchQuery)

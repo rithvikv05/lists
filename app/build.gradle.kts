@@ -90,6 +90,12 @@ dependencies {
     // WorkManager for background sync
     implementation("androidx.work:work-runtime-ktx:2.10.0")
 
+    // CameraX & Thin Play Services ML Kit Barcode Scanning (Zero-bloat, models loaded via Google Play Services)
+    implementation("androidx.camera:camera-camera2:1.4.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("androidx.camera:camera-view:1.4.1")
+    implementation("com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.1")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

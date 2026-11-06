@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -25,6 +26,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
@@ -52,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,6 +81,9 @@ enum class ListsSortOption(val displayName: String) {
 @Composable
 fun ListsScreen(
     repository: AppRepository,
+    initialCategory: Category? = null,
+    initialArchive: Boolean = false,
+    onNavigateBack: (() -> Unit)? = null,
     onNavigateToListDetail: (Long) -> Unit,
     onNavigateToSettings: (() -> Unit)? = null,
     searchTrigger: Int = 0,
@@ -99,8 +105,8 @@ fun ListsScreen(
     }
 
     val listsWithStats by repository.allListsWithStats.collectAsState(initial = emptyList())
-    var selectedCategoryFilter by remember { mutableStateOf<Category?>(null) }
-    var isArchiveSelected by remember { mutableStateOf(false) }
+    var selectedCategoryFilter by remember(initialCategory) { mutableStateOf(initialCategory) }
+    var isArchiveSelected by remember(initialArchive) { mutableStateOf(initialArchive) }
     var sortOption by remember { mutableStateOf(ListsSortOption.RECENT) }
     var searchQuery by remember { mutableStateOf("") }
     var showSearchBar by remember { mutableStateOf(false) }
@@ -159,6 +165,9 @@ fun ListsScreen(
     BackHandler(enabled = selectedListIds.isNotEmpty()) {
         selectedListIds = emptySet()
     }
+    BackHandler(enabled = selectedListIds.isEmpty() && onNavigateBack != null) {
+        onNavigateBack?.invoke()
+    }
 
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
@@ -185,7 +194,7 @@ fun ListsScreen(
         val counts = mutableMapOf<String, Int>()
         listsWithStats.filter { !it.list.isArchived }.forEach {
             val cat = it.list.category.uppercase()
-            counts[cat] = (counts[cat] ?: 0) + it.itemCount
+            counts[cat] = (counts[cat] ?: 0) + 1
         }
         counts
     }
@@ -239,46 +248,13 @@ fun ListsScreen(
     val isWideLayout = isTablet
     val gridColumns = if (isWideLayout) 4 else 2
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        floatingActionButton = {
-            if (selectedListIds.isEmpty()) {
-                // 2D Minimal, Flush "New List" Box (No shadows, No + plus icon, centered text, same size as Create List)
-                Surface(
-                    onClick = {
-                        triggerStrongTick(context)
-                        showCreateSheet = true
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    shadowElevation = 0.dp,
-                    modifier = Modifier
-                        .padding(bottom = 24.dp)
-                        .height(40.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 20.dp)
-                            .fillMaxHeight(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "New List",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .then(
+    val horizontalPadding = if (isWideLayout) 24.dp else 16.dp
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .then(
                         if (showSearchBar) {
                             Modifier.clickable(
                                 interactionSource = remember { MutableInteractionSource() },
@@ -425,16 +401,212 @@ fun ListsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Lists",
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            letterSpacing = (-0.5).sp
-                        )
+                        if (isWideLayout) {
+                            // TABLET & WEB (isWideLayout):
+                            // Left: Big Title with Category Arrow + List Count Badge (No back button, uniform to left end)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            triggerAsmrTick(context)
+                                            showCategoryModal = true
+                                        }
+                                        .padding(vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = if (isArchiveSelected) "Archive" else selectedCategoryFilter?.displayName ?: "Lists",
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        fontSize = 26.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        letterSpacing = (-0.5).sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                        contentDescription = "Select Category",
+                                        tint = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
 
-                        if (!isWideLayout) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    modifier = Modifier.align(Alignment.CenterVertically)
+                                ) {
+                                    val count = displayedLists.size
+                                    Text(
+                                        text = if (count == 1) "1 list" else "$count lists",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            // Right: Filter (Recents) dropdown and Grid/List slider only
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // Filter / Sort Dropdown
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            triggerAsmrTick(context)
+                                            showSortSheet = true
+                                        }
+                                        .padding(vertical = 4.dp, horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Sort,
+                                        contentDescription = "Filter",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                    Text(
+                                        text = sortOption.displayName,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                // Grid / List Slider Switcher
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    border = BorderStroke(
+                                        0.5.dp,
+                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                    ),
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .wrapContentWidth()
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(2.dp)
+                                    ) {
+                                        val isGrid = homeLayoutMode == HomeLayoutMode.BENTO
+                                        Surface(
+                                            onClick = {
+                                                homeLayoutMode = HomeLayoutMode.BENTO
+                                                uiPrefs.edit().putString("home_layout_mode", HomeLayoutMode.BENTO.name).apply()
+                                                triggerAsmrTick(context)
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = if (isGrid) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                                            modifier = Modifier.size(30.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.GridView,
+                                                    contentDescription = "Grid",
+                                                    tint = if (isGrid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(17.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Surface(
+                                            onClick = {
+                                                homeLayoutMode = HomeLayoutMode.DISCRETE
+                                                uiPrefs.edit().putString("home_layout_mode", HomeLayoutMode.DISCRETE.name).apply()
+                                                triggerAsmrTick(context)
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = if (!isGrid) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+                                            modifier = Modifier.size(30.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ViewAgenda,
+                                                    contentDescription = "List",
+                                                    tint = if (!isGrid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(17.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // MOBILE (!isWideLayout):
+                            // Left: Back button (if available) + Category Title with Arrow directly in header
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
+                                if (onNavigateBack != null) {
+                                    IconButton(
+                                        onClick = {
+                                            triggerStrongTick(context)
+                                            onNavigateBack.invoke()
+                                        },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            triggerAsmrTick(context)
+                                            showCategoryModal = true
+                                        }
+                                        .padding(vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = if (isArchiveSelected) "Archive" else selectedCategoryFilter?.displayName ?: "Lists",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        letterSpacing = (-0.5).sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                        contentDescription = "Select Category",
+                                        tint = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            // Right: Sync, Search, Filter (Sort)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -481,46 +653,47 @@ fun ListsScreen(
                                     }
                                 }
 
-                            // Search Button
-                            IconButton(
-                                onClick = {
-                                    triggerAsmrTick(context)
-                                    showSearchBar = !showSearchBar
-                                    if (!showSearchBar) {
-                                        focusManager.clearFocus()
-                                        searchQuery = ""
-                                    }
-                                },
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "Search",
-                                    tint = if (showSearchBar || searchQuery.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-
-                            // Settings Button
-                            if (onNavigateToSettings != null) {
+                                // Search Button
                                 IconButton(
-                                    onClick = onNavigateToSettings,
+                                    onClick = {
+                                        triggerAsmrTick(context)
+                                        showSearchBar = !showSearchBar
+                                        if (!showSearchBar) {
+                                            focusManager.clearFocus()
+                                            searchQuery = ""
+                                        }
+                                    },
                                     modifier = Modifier.size(40.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Settings,
-                                        contentDescription = "Settings",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = "Search",
+                                        tint = if (showSearchBar || searchQuery.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(22.dp)
+                                    )
+                                }
+
+                                // Filter / Sort Button
+                                IconButton(
+                                    onClick = {
+                                        triggerAsmrTick(context)
+                                        showSortSheet = true
+                                    },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Sort,
+                                        contentDescription = "Filter",
+                                        tint = if (sortOption != ListsSortOption.RECENT) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            // Collapsible Search Bar (Unified ListsSearchBar, auto-closes on tap outside)
+                // Collapsible Search Bar (Unified ListsSearchBar, auto-closes on tap outside)
                 AnimatedVisibility(
                     visible = showSearchBar,
                     enter = expandVertically(animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)) + fadeIn(animationSpec = tween(durationMillis = 120)),
@@ -538,75 +711,6 @@ fun ListsScreen(
                         autoFocus = true,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
-                }
-
-                // Filter & Sort Controls Bar (Inline Category Flush with Background Left + Right-Aligned Recent matching Stitch photo)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Category Dropdown trigger - INLINE FLUSH WITH BACKGROUND
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                triggerAsmrTick(context)
-                                showCategoryModal = true
-                            }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = if (isArchiveSelected) "Archived" else selectedCategoryFilter?.displayName ?: "All Categories",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (selectedCategoryFilter != null) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    // Sort Button - FLUSH WITH BACKGROUND, ACCENT FILTER ICON
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                triggerAsmrTick(context)
-                                showSortSheet = true
-                            }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Sort,
-                            contentDescription = "Filter",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Text(
-                            text = sortOption.displayName,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -705,8 +809,47 @@ fun ListsScreen(
                     }
                 }
             }
+
+            // Bottom Action Row matching CategoriesHomeScreen:
+            // Mobile: 16dp right end padding, 20dp vertical
+            // Tablet/Web: 24dp right end padding matching cards, 20dp vertical
+            if (selectedListIds.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = horizontalPadding, vertical = 20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            onClick = {
+                                triggerStrongTick(context)
+                                showCreateSheet = true
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            shadowElevation = 0.dp,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "New List",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
-    }
 
     // Scalable Category Selector Modal (Stitch #00 & #06)
     if (showCategoryModal) {
@@ -885,6 +1028,7 @@ fun ListsScreen(
     // New List Modal directly from Stitch Screen #00
     if (showCreateSheet) {
         NewListModal(
+            initialCategory = selectedCategoryFilter ?: Category.MOVIE,
             onDismiss = { showCreateSheet = false },
             onCreate = { name, category ->
                 triggerStrongTick(context)

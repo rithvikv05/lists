@@ -74,6 +74,9 @@ import com.minimal.lists.ui.components.CoverImage
 import com.minimal.lists.ui.components.triggerAsmrTick
 import com.minimal.lists.ui.components.triggerStrongTick
 import com.minimal.lists.ui.theme.*
+import com.minimal.lists.data.model.BookTrackingUtils
+import com.minimal.lists.data.model.ReadingSessionRecord
+import com.minimal.lists.ui.components.BookReadingHistoryDialog
 
 fun formatMinutes(minutes: Int): String {
     if (minutes <= 0) return "0m"
@@ -130,10 +133,17 @@ fun ItemDetailScreen(
         catFromItem ?: catFromParent ?: Category.MOVIE
     }
 
+    LaunchedEffect(currentItem.id, currentItem.totalPages) {
+        if (category == Category.BOOK && currentItem.totalPages <= 0) {
+            repository.ensureBookPages(currentItem)
+        }
+    }
+
     var showOptionsSheet by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showBookLogModal by remember { mutableStateOf(false) }
+    var showReadingHistoryModal by remember { mutableStateOf(false) }
     var isOttDropdownOpen by remember { mutableStateOf(false) }
 
     val configuration = LocalConfiguration.current
@@ -308,7 +318,8 @@ fun ItemDetailScreen(
                                     repository = repository,
                                     scope = scope,
                                     context = context,
-                                    onOpenBookLog = { showBookLogModal = true }
+                                    onOpenBookLog = { showBookLogModal = true },
+                                    onOpenBookHistory = { showReadingHistoryModal = true }
                                 )
 
                                 Spacer(modifier = Modifier.height(48.dp))
@@ -351,7 +362,8 @@ fun ItemDetailScreen(
                                 repository = repository,
                                 scope = scope,
                                 context = context,
-                                onOpenBookLog = { showBookLogModal = true }
+                                onOpenBookLog = { showBookLogModal = true },
+                                onOpenBookHistory = { showReadingHistoryModal = true }
                             )
 
                             Spacer(modifier = Modifier.height(48.dp))
@@ -580,11 +592,29 @@ fun ItemDetailScreen(
                     val finalTotalPages = if (newTotalPages != null && newTotalPages > 0) newTotalPages else currentItem.totalPages
                     val finalCurrentPage = pageReached ?: currentItem.currentPage
                     val isFinished = finalTotalPages > 0 && finalCurrentPage >= finalTotalPages
+                    val prevPage = currentItem.currentPage
+                    val pagesRead = (finalCurrentPage - prevPage).coerceAtLeast(0)
+
+                    val sessions = BookTrackingUtils.parseReadingSessions(currentItem.readingSessionsJson).toMutableList()
+                    if (addedMinutes > 0 || pagesRead > 0) {
+                        sessions.add(
+                            0,
+                            ReadingSessionRecord(
+                                startPage = prevPage,
+                                endPage = finalCurrentPage,
+                                pagesRead = pagesRead,
+                                durationMinutes = addedMinutes
+                            )
+                        )
+                    }
+                    val newSessionsJson = BookTrackingUtils.serializeReadingSessions(sessions)
+
                     repository.updateItem(
                         currentItem.copy(
                             loggedMinutes = currentItem.loggedMinutes + addedMinutes,
                             currentPage = finalCurrentPage,
                             totalPages = finalTotalPages,
+                            readingSessionsJson = newSessionsJson,
                             marked = if (isFinished) true else currentItem.marked
                         )
                     )
@@ -598,7 +628,32 @@ fun ItemDetailScreen(
                         currentItem.copy(
                             loggedMinutes = 0,
                             currentPage = 0,
+                            readingSessionsJson = "",
                             marked = false
+                        )
+                    )
+                }
+            }
+        )
+    }
+
+    // Modal: Book Reading Session History
+    if (showReadingHistoryModal) {
+        val sessions = remember(currentItem.readingSessionsJson) {
+            BookTrackingUtils.parseReadingSessions(currentItem.readingSessionsJson)
+        }
+        BookReadingHistoryDialog(
+            sessions = sessions,
+            totalPages = currentItem.totalPages,
+            currentPage = currentItem.currentPage,
+            onDismiss = { showReadingHistoryModal = false },
+            onDeleteSession = { sessionId ->
+                val updatedSessions = sessions.filter { it.id != sessionId }
+                val newSessionsJson = BookTrackingUtils.serializeReadingSessions(updatedSessions)
+                scope.launch {
+                    repository.updateItem(
+                        currentItem.copy(
+                            readingSessionsJson = newSessionsJson
                         )
                     )
                 }
@@ -656,7 +711,8 @@ fun ItemCategoryBodySections(
     repository: AppRepository,
     scope: kotlinx.coroutines.CoroutineScope,
     context: Context,
-    onOpenBookLog: () -> Unit
+    onOpenBookLog: () -> Unit,
+    onOpenBookHistory: () -> Unit = {}
 ) {
     when (category) {
         Category.MOVIE -> {
@@ -691,13 +747,14 @@ fun ItemCategoryBodySections(
         }
 
         Category.BOOK -> {
-            if (currentItem.totalPages > 0) {
-                BookReadingLogCard(
-                    item = currentItem,
-                    onOpenLogModal = onOpenBookLog
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-            }
+            BookReadingLogCard(
+                item = currentItem,
+                onOpenLogModal = onOpenBookLog,
+                onOpenHistory = onOpenBookHistory
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            BookFinishEtaCard(item = currentItem)
+            Spacer(modifier = Modifier.height(16.dp))
             RatingCardSection(item = currentItem, repository = repository, scope = scope, context = context)
             OverviewSection(currentItem.overview, title = "Synopsis")
         }
@@ -822,6 +879,16 @@ fun UnifiedTopHeroSection(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        if (category == Category.BOOK && item.totalPages > 0) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            val pubSuffix = if (item.publisher.isNotBlank()) " · ${item.publisher}" else ""
+                            Text(
+                                text = "${item.totalPages} pages$pubSuffix",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -1921,8 +1988,16 @@ fun ChaptersTracker(
 @Composable
 fun BookReadingLogCard(
     item: ListItem,
-    onOpenLogModal: () -> Unit
+    onOpenLogModal: () -> Unit,
+    onOpenHistory: () -> Unit
 ) {
+    val sessions = remember(item.readingSessionsJson) {
+        BookTrackingUtils.parseReadingSessions(item.readingSessionsJson)
+    }
+    val speedResult = remember(sessions, item.totalPages, item.currentPage) {
+        BookTrackingUtils.calculateReadingSpeed(sessions, item.totalPages, item.currentPage)
+    }
+
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1942,22 +2017,48 @@ fun BookReadingLogCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
-                Surface(
-                    onClick = onOpenLogModal,
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.height(32.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.padding(horizontal = 14.dp)
+                    if (sessions.isNotEmpty()) {
+                        Surface(
+                            onClick = onOpenHistory,
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 10.dp)
+                            ) {
+                                Text(
+                                    text = "History (${sessions.size})",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Surface(
+                        onClick = onOpenLogModal,
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.height(32.dp)
                     ) {
-                        Text(
-                            text = "Log",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 14.dp)
+                        ) {
+                            Text(
+                                text = "Log",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
                     }
                 }
             }
@@ -1966,7 +2067,8 @@ fun BookReadingLogCard(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
             ) {
                 Column {
                     Text(
@@ -1980,6 +2082,22 @@ fun BookReadingLogCard(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                }
+
+                if (speedResult.averagePph > 0) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Avg Pace",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "${speedResult.averagePph} p/h",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
 
                 Column(horizontalAlignment = Alignment.End) {
@@ -1998,7 +2116,7 @@ fun BookReadingLogCard(
             }
 
             if (item.totalPages > 0) {
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
                 val progress = (item.currentPage.toFloat() / item.totalPages.toFloat()).coerceIn(0f, 1f)
                 LinearProgressIndicator(
                     progress = { progress },
@@ -2009,7 +2127,64 @@ fun BookReadingLogCard(
                     color = MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
                 )
+
             }
+        }
+    }
+}
+
+@Composable
+fun BookFinishEtaCard(item: ListItem) {
+    val sessions = remember(item.readingSessionsJson) {
+        BookTrackingUtils.parseReadingSessions(item.readingSessionsJson)
+    }
+    val speedResult = remember(sessions, item.totalPages, item.currentPage) {
+        BookTrackingUtils.calculateReadingSpeed(sessions, item.totalPages, item.currentPage)
+    }
+
+    val isFinished = item.totalPages > 0 && item.currentPage >= item.totalPages
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Timer,
+                    contentDescription = null,
+                    modifier = Modifier.size(17.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Estimated Finish",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            Text(
+                text = when {
+                    isFinished -> "Completed"
+                    speedResult.averagePph > 0f && speedResult.etaMinutes > 0 -> speedResult.formattedEta
+                    else -> "--"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isFinished) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

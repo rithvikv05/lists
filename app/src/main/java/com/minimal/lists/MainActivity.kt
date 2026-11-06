@@ -14,11 +14,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -45,6 +49,7 @@ import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+import com.minimal.lists.data.model.Category
 import com.minimal.lists.data.repository.AppRepository
 import com.minimal.lists.data.sync.DriveSyncManager
 import com.minimal.lists.data.sync.GoogleSignInHelper
@@ -211,13 +216,13 @@ fun AppNavigation(
                         } else {
                             Surface(
                                 onClick = {
-                                    if (currentRoute == "lists") {
+                                    if (currentRoute == "home" || currentRoute?.startsWith("lists") == true) {
                                         searchTriggerHome++
                                     } else if (currentRoute?.startsWith("listDetail") == true) {
                                         searchTriggerDetail++
                                     } else {
-                                        navController.navigate("lists") {
-                                            popUpTo("lists") { inclusive = false }
+                                        navController.navigate("home") {
+                                            popUpTo("home") { inclusive = false }
                                             launchSingleTop = true
                                         }
                                         searchTriggerHome++
@@ -241,11 +246,11 @@ fun AppNavigation(
                 }
             ) {
                 NavigationRailItem(
-                    selected = currentRoute == "lists",
+                    selected = currentRoute == "home",
                     onClick = {
-                        if (currentRoute != "lists") {
-                            navController.navigate("lists") {
-                                popUpTo("lists") {
+                        if (currentRoute != "home") {
+                            navController.navigate("home") {
+                                popUpTo("home") {
                                     inclusive = false
                                 }
                                 launchSingleTop = true
@@ -254,11 +259,11 @@ fun AppNavigation(
                     },
                     icon = {
                         Icon(
-                            imageVector = if (currentRoute == "lists") Icons.AutoMirrored.Filled.List else Icons.AutoMirrored.Outlined.List,
-                            contentDescription = "Lists"
+                            imageVector = if (currentRoute == "home") Icons.Filled.Home else Icons.Outlined.Home,
+                            contentDescription = "Home"
                         )
                     },
-                    label = { Text("Lists") }
+                    label = { Text("Home") }
                 )
                 NavigationRailItem(
                     selected = false,
@@ -324,8 +329,25 @@ fun AppNavigation(
                     label = { Text("Settings") }
                 )
 
-                // Align Light/Dark mode button to the bottom of the sidebar
+                // Align Archive & Light/Dark mode button to the bottom of the sidebar
                 Spacer(modifier = Modifier.weight(1f))
+
+                val isArchiveSelected = currentRoute?.contains("archive=true") == true
+                NavigationRailItem(
+                    selected = isArchiveSelected,
+                    onClick = {
+                        navController.navigate("lists?archive=true") {
+                            launchSingleTop = true
+                        }
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = if (isArchiveSelected) Icons.Filled.Archive else Icons.Outlined.Archive,
+                            contentDescription = "Archive"
+                        )
+                    },
+                    label = { Text("Archive") }
+                )
 
                 NavigationRailItem(
                     selected = false,
@@ -351,13 +373,71 @@ fun AppNavigation(
 
         NavHost(
             navController = navController,
-            startDestination = "lists",
+            startDestination = "home",
             modifier = Modifier.weight(1f)
         ) {
-            // Main collections overview
+            // New Category-First Homepage
+            composable("home") {
+                CategoriesHomeScreen(
+                    repository = repository,
+                    onNavigateToCategory = { category ->
+                        navController.navigate("lists?category=${category.id}")
+                    },
+                    onNavigateToArchive = {
+                        navController.navigate("lists?archive=true")
+                    },
+                    onNavigateToSettings = {
+                        navController.navigate("settings")
+                    },
+                    searchTrigger = searchTriggerHome
+                )
+            }
+
+            // Main lists view (old home page, scoped to category or archive)
+            composable(
+                route = "lists?category={category}&archive={archive}",
+                arguments = listOf(
+                    navArgument("category") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                    navArgument("archive") {
+                        type = NavType.BoolType
+                        defaultValue = false
+                    }
+                )
+            ) { backStackEntry ->
+                val catId = backStackEntry.arguments?.getString("category")
+                val isArchive = backStackEntry.arguments?.getBoolean("archive") ?: false
+                val initialCategory = catId?.let { Category.fromId(it) }
+
+                ListsScreen(
+                    repository = repository,
+                    initialCategory = initialCategory,
+                    initialArchive = isArchive,
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
+                    onNavigateToListDetail = { listId ->
+                        searchTriggerDetail = 0
+                        navController.navigate("listDetail/$listId")
+                    },
+                    onNavigateToSettings = {
+                        navController.navigate("settings")
+                    },
+                    searchTrigger = searchTriggerHome
+                )
+            }
+
             composable("lists") {
                 ListsScreen(
                     repository = repository,
+                    initialCategory = null,
+                    initialArchive = false,
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
                     onNavigateToListDetail = { listId ->
                         searchTriggerDetail = 0
                         navController.navigate("listDetail/$listId")

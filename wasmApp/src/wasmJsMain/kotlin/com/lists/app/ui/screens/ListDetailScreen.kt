@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -57,12 +58,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import com.lists.app.statusBarsPadding
+import com.lists.app.PullToRefreshBox
 import com.lists.app.triggerAsmrTick
 import com.lists.app.triggerStrongTick
 import com.lists.app.data.db.ListItem
 import com.lists.app.data.model.Category
 import com.lists.app.data.model.RatingScaleOption
 import com.lists.app.data.repository.AppRepository
+import com.lists.app.data.sync.DriveSyncManager
+import com.lists.app.data.sync.GoogleSignInHelper
 import com.lists.app.ui.components.*
 import com.lists.app.ui.theme.*
 
@@ -109,6 +113,24 @@ fun ListDetailScreen(
     }
     var statusFilter by remember { mutableStateOf(ItemStatusFilter.ALL) }
     var sortOption by remember { mutableStateOf(ItemSortOption.DATE_ADDED_DESC) }
+
+    val syncManager = remember { DriveSyncManager(context) }
+    val signInHelper = remember { GoogleSignInHelper(context) }
+    var isRefreshing by remember { mutableStateOf(false) }
+
+    val onPullRefresh: () -> Unit = {
+        isRefreshing = true
+        triggerStrongTick(context)
+        scope.launch {
+            val account = signInHelper.getSignedInAccount()
+            if (account != null) {
+                syncManager.syncNow(account, repository)
+            } else {
+                kotlinx.coroutines.delay(500)
+            }
+            isRefreshing = false
+        }
+    }
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
@@ -200,62 +222,30 @@ fun ListDetailScreen(
     val density = LocalDensity.current
     val statusBarTop = 0.dp
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        floatingActionButton = {
-            if (selectedItemIds.isEmpty()) {
-                Surface(
-                    onClick = {
-                        triggerStrongTick(context)
-                        onNavigateToAddItem(listId, null)
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    shadowElevation = 0.dp,
-                    modifier = Modifier
-                        .padding(bottom = 24.dp)
-                        .height(40.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 20.dp)
-                            .fillMaxHeight(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Add Item",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    if (isSearchActive) {
-                        focusManager.clearFocus()
-                        isSearchActive = false
-                        searchQuery = ""
-                    }
-                },
-            contentAlignment = Alignment.TopCenter
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxSize()
-                    .padding(horizontal = if (isWideLayout) 24.dp else 16.dp)
+    val horizontalPadding = if (isWideLayout) 24.dp else 16.dp
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
             ) {
+                if (isSearchActive) {
+                    focusManager.clearFocus()
+                    isSearchActive = false
+                    searchQuery = ""
+                }
+            },
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxSize()
+                .padding(horizontal = if (isWideLayout) 24.dp else 16.dp)
+        ) {
                 if (selectedItemIds.isNotEmpty()) {
                     Row(
                         modifier = Modifier
@@ -425,15 +415,34 @@ fun ListDetailScreen(
                                 }
                             }
                         } else {
-                            IconButton(
-                                onClick = onNavigateBack,
-                                modifier = Modifier.size(40.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f, fill = false)
                             ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(22.dp)
+                                IconButton(
+                                    onClick = {
+                                        triggerStrongTick(context)
+                                        onNavigateBack.invoke()
+                                    },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = list?.name ?: "List",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    letterSpacing = (-0.5).sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -610,13 +619,20 @@ fun ListDetailScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                if (searchQuery.isNotBlank() && filteredItems.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = onPullRefresh,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    if (searchQuery.isNotBlank() && filteredItems.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -886,7 +902,47 @@ fun ListDetailScreen(
                 }
             }
         }
-    }
+
+        // Bottom Action Row matching CategoriesHomeScreen:
+            // Mobile: 16dp right end padding, 20dp vertical
+            // Tablet/Web: 24dp right end padding matching cards, 20dp vertical
+            if (selectedItemIds.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = horizontalPadding, vertical = 20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            onClick = {
+                                triggerStrongTick(context)
+                                onNavigateToAddItem(listId, null)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            shadowElevation = 0.dp,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Add Item",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
     if (showSortSheet) {
         ModalBottomSheet(

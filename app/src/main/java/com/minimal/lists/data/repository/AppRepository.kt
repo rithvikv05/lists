@@ -251,7 +251,10 @@ class AppRepository(private val context: Context) {
             category = search.category.id,
             externalUrl = search.externalUrl,
             totalEpisodes = search.totalEpisodes,
-            totalPages = search.totalPages
+            totalPages = search.totalPages,
+            isbn = search.isbn,
+            bookLanguage = search.language,
+            publisher = search.publisher
         )
         val insertedId = itemDao.insertItem(item)
         notifyDataChanged()
@@ -272,7 +275,56 @@ class AppRepository(private val context: Context) {
                 } catch (_: Exception) {}
             }
         }
+        if (search.category == Category.BOOK && search.totalPages <= 0) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val searchRepo = SearchRepository()
+                    val resolvedPages = searchRepo.resolveBookPages(search.title, search.creator, search.isbn)
+                    if (resolvedPages > 0) {
+                        val current = itemDao.getItemByIdSync(insertedId)
+                        if (current != null && current.totalPages <= 0) {
+                            itemDao.updateItem(current.copy(totalPages = resolvedPages, updatedAt = System.currentTimeMillis()))
+                            notifyDataChanged()
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
         insertedId
+    }
+
+    suspend fun addManualBookItem(
+        listId: Long,
+        title: String,
+        author: String,
+        isbn: String = "",
+        totalPages: Int = 0,
+        language: String = "",
+        publisher: String = "",
+        publishDate: String = "",
+        coverUrl: String = ""
+    ): Long = withContext(Dispatchers.IO) {
+        val year = if (publishDate.length >= 4) publishDate.take(4) else ""
+        val item = ListItem(
+            listId = listId,
+            title = title.trim(),
+            creator = author.trim(),
+            isbn = isbn.trim(),
+            totalPages = totalPages.coerceAtLeast(0),
+            bookLanguage = language.trim(),
+            publisher = publisher.trim(),
+            releaseDate = publishDate.trim(),
+            releaseYear = year,
+            coverUrl = coverUrl.trim(),
+            category = Category.BOOK.id,
+            status = ItemStatus.BACKLOG
+        )
+        val id = itemDao.insertItem(item)
+        notifyDataChanged()
+        if (coverUrl.isNotBlank()) {
+            triggerOfflineCoverDownload(item.uuid, item.coverUrl)
+        }
+        id
     }
 
     suspend fun ensureItemCover(item: ListItem) = withContext(Dispatchers.IO) {
@@ -287,6 +339,21 @@ class AppRepository(private val context: Context) {
                     itemDao.updateItem(current.copy(coverUrl = resolved, updatedAt = System.currentTimeMillis()))
                     notifyDataChanged()
                     triggerOfflineCoverDownload(current.uuid, resolved)
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    suspend fun ensureBookPages(item: ListItem) = withContext(Dispatchers.IO) {
+        if (item.category != Category.BOOK.id || item.totalPages > 0) return@withContext
+        try {
+            val searchRepo = SearchRepository()
+            val resolved = searchRepo.resolveBookPages(item.title, item.creator, item.isbn)
+            if (resolved > 0) {
+                val current = itemDao.getItemByIdSync(item.id)
+                if (current != null && current.totalPages <= 0) {
+                    itemDao.updateItem(current.copy(totalPages = resolved, updatedAt = System.currentTimeMillis()))
+                    notifyDataChanged()
                 }
             }
         } catch (_: Exception) {}
@@ -550,6 +617,10 @@ class AppRepository(private val context: Context) {
             obj.put("checkedEpisodesJson", it.checkedEpisodesJson)
             obj.put("episodesDataJson", it.episodesDataJson)
             obj.put("loggedMinutes", it.loggedMinutes)
+            obj.put("isbn", it.isbn)
+            obj.put("bookLanguage", it.bookLanguage)
+            obj.put("publisher", it.publisher)
+            obj.put("readingSessionsJson", it.readingSessionsJson)
             obj.put("createdAt", it.createdAt)
             obj.put("updatedAt", it.updatedAt)
             itemsArr.put(obj)
@@ -647,6 +718,10 @@ class AppRepository(private val context: Context) {
                     checkedEpisodesJson = obj.optString("checkedEpisodesJson", ""),
                     episodesDataJson = obj.optString("episodesDataJson", ""),
                     loggedMinutes = obj.optInt("loggedMinutes", 0),
+                    isbn = obj.optString("isbn", ""),
+                    bookLanguage = obj.optString("bookLanguage", ""),
+                    publisher = obj.optString("publisher", ""),
+                    readingSessionsJson = obj.optString("readingSessionsJson", ""),
                     createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                     updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
                 )

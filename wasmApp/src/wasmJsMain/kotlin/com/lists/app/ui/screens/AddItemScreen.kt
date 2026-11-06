@@ -48,6 +48,7 @@ import com.lists.app.formatDecimal1
 import com.lists.app.statusBarsPadding
 import com.lists.app.triggerAsmrTick
 import com.lists.app.triggerStrongTick
+import com.lists.app.ui.components.ManualBookEntryDialog
 import com.lists.app.data.api.BookSearchType
 import com.lists.app.data.api.SearchRepository
 import com.lists.app.data.model.Category
@@ -80,6 +81,7 @@ fun AddItemScreen(
         }
     }
     var showCategoryModal by remember { mutableStateOf(false) }
+    var showManualBookDialog by remember { mutableStateOf(false) }
 
     var searchQuery by remember { mutableStateOf(initialQuery ?: "") }
     var searchResults by remember { mutableStateOf<List<SearchResult>>(emptyList()) }
@@ -483,10 +485,14 @@ fun AddItemScreen(
                             Surface(
                                 onClick = {
                                     triggerStrongTick()
-                                    scope.launch {
-                                        repository.addCustomItem(listId, searchQuery.trim(), activeCategory.id)
-                                        snackbarHostState.showSnackbar("Added “${searchQuery.trim()}”")
-                                        searchQuery = ""
+                                    if (activeCategory == Category.BOOK) {
+                                        showManualBookDialog = true
+                                    } else {
+                                        scope.launch {
+                                            repository.addCustomItem(listId, searchQuery.trim(), activeCategory.id)
+                                            snackbarHostState.showSnackbar("Added “${searchQuery.trim()}”")
+                                            searchQuery = ""
+                                        }
                                     }
                                 },
                                 shape = RoundedCornerShape(14.dp),
@@ -606,9 +612,11 @@ fun AddItemScreen(
                                         overflow = TextOverflow.Ellipsis
                                     )
 
-                                    val subtitle = listOf(result.creator, result.releaseYear)
-                                        .filter { it.isNotBlank() }
-                                        .joinToString(" · ")
+                                    val subtitle = listOf(
+                                        result.creator,
+                                        result.releaseYear,
+                                        if (result.totalPages > 0) "${result.totalPages}p" else ""
+                                    ).filter { it.isNotBlank() }.joinToString(" · ")
 
                                     if (subtitle.isNotEmpty()) {
                                         Text(
@@ -793,6 +801,31 @@ fun AddItemScreen(
                 }
             },
             onDismiss = { showCategoryModal = false }
+        )
+    }
+
+    if (showManualBookDialog) {
+        ManualBookEntryDialog(
+            initialTitle = searchQuery.trim(),
+            onDismiss = { showManualBookDialog = false },
+            onSave = { title, author, isbn, pages, lang, publisher, date, cover ->
+                showManualBookDialog = false
+                scope.launch {
+                    repository.addManualBookItem(
+                        listId = listId,
+                        title = title,
+                        author = author,
+                        isbn = isbn,
+                        totalPages = pages,
+                        language = lang,
+                        publisher = publisher,
+                        publishDate = date,
+                        coverUrl = cover
+                    )
+                    snackbarHostState.showSnackbar("Saved “$title”")
+                    searchQuery = ""
+                }
+            }
         )
     }
 }

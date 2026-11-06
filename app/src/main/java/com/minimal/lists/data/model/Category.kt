@@ -6,8 +6,7 @@ import com.minimal.lists.R
 enum class CategoryGroup(val displayName: String) {
     WATCH("Watch"),
     READ("Read"),
-    PLAY("Play"),
-    LISTEN("Listen")
+    PLAY("Play")
 }
 
 enum class Category(
@@ -72,20 +71,6 @@ enum class Category(
         searchHint = "Search board games...",
         group = CategoryGroup.PLAY,
         color = Color(0xFF6D4C41)
-    ),
-    PODCAST(
-        id = "PODCAST",
-        displayName = "Podcasts",
-        searchHint = "Search podcasts...",
-        group = CategoryGroup.LISTEN,
-        color = Color(0xFF00897B)
-    ),
-    MUSIC(
-        id = "MUSIC",
-        displayName = "Music",
-        searchHint = "Search albums or artists...",
-        group = CategoryGroup.LISTEN,
-        color = Color(0xFFD81B60)
     );
 
     val iconRes: Int
@@ -98,21 +83,10 @@ enum class Category(
             COMIC -> R.drawable.ic_type_book
             GAME -> R.drawable.ic_type_videogame
             BOARD_GAME -> R.drawable.ic_type_videogame
-            PODCAST -> R.drawable.ic_type_tv_show
-            MUSIC -> R.drawable.ic_type_movie
         }
 
     companion object {
-        val activeCategories = listOf(
-            MOVIE,
-            TV_SHOW,
-            ANIME,
-            BOOK,
-            MANGA,
-            COMIC,
-            GAME,
-            BOARD_GAME
-        )
+        val activeCategories = entries.toList()
 
         fun fromId(id: String?): Category {
             if (id == null) return MOVIE
@@ -122,7 +96,6 @@ enum class Category(
                     "TV", "TVSHOW", "SERIES" -> TV_SHOW
                     "NOVEL", "MANHWA" -> MANGA
                     "BOARDGAME", "TABLETOP" -> BOARD_GAME
-                    "ALBUM", "SONG" -> MUSIC
                     else -> MOVIE
                 }
         }
@@ -176,7 +149,10 @@ data class SearchResult(
     val category: Category = Category.MOVIE,
     val externalUrl: String = "",
     val totalEpisodes: Int = 0,
-    val totalPages: Int = 0
+    val totalPages: Int = 0,
+    val isbn: String = "",
+    val publisher: String = "",
+    val language: String = ""
 )
 
 enum class RatingScaleOption(

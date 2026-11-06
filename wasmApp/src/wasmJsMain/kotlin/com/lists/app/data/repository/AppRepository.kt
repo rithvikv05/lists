@@ -12,6 +12,9 @@ import com.lists.app.data.store.WebStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -143,10 +146,76 @@ class AppRepository(val context: Any? = null) {
             category = result.category.id,
             externalUrl = result.externalUrl,
             totalEpisodes = result.totalEpisodes,
-            totalPages = result.totalPages
+            totalPages = result.totalPages,
+            isbn = result.isbn,
+            bookLanguage = result.language,
+            publisher = result.publisher
+        )
+        WebStore.addItem(item)
+        if (result.category == Category.BOOK && result.totalPages <= 0) {
+            CoroutineScope(Dispatchers.Default).launch {
+                try {
+                    val searchRepo = SearchRepository()
+                    val pages = searchRepo.resolveBookPages(result.title, result.creator, result.isbn)
+                    if (pages > 0) {
+                        val current = WebStore.items.value.firstOrNull { it.id == newId }
+                        if (current != null && current.totalPages <= 0) {
+                            WebStore.updateItem(current.copy(totalPages = pages, updatedAt = currentTimeMillis()))
+                        }
+                    }
+                } catch (_: Throwable) {}
+            }
+        }
+        return newId
+    }
+
+    suspend fun addManualBookItem(
+        listId: Long,
+        title: String,
+        author: String,
+        isbn: String = "",
+        totalPages: Int = 0,
+        language: String = "",
+        publisher: String = "",
+        publishDate: String = "",
+        coverUrl: String = ""
+    ): Long {
+        val parentList = WebStore.lists.value.firstOrNull { it.id == listId }
+        val maxId = WebStore.items.value.maxOfOrNull { it.id } ?: 0L
+        val newId = maxId + 1
+        val year = if (publishDate.length >= 4) publishDate.take(4) else ""
+        val item = ListItem(
+            id = newId,
+            listId = listId,
+            listUuid = parentList?.uuid ?: "",
+            title = title.trim(),
+            creator = author.trim(),
+            isbn = isbn.trim(),
+            totalPages = totalPages.coerceAtLeast(0),
+            bookLanguage = language.trim(),
+            publisher = publisher.trim(),
+            releaseDate = publishDate.trim(),
+            releaseYear = year,
+            coverUrl = coverUrl.trim(),
+            category = Category.BOOK.id,
+            status = ItemStatus.BACKLOG
         )
         WebStore.addItem(item)
         return newId
+    }
+
+    suspend fun ensureBookPages(item: ListItem) {
+        if (item.category != Category.BOOK.id || item.totalPages > 0) return
+        try {
+            val searchRepo = SearchRepository()
+            val resolved = searchRepo.resolveBookPages(item.title, item.creator, item.isbn)
+            if (resolved > 0) {
+                val current = WebStore.items.value.firstOrNull { it.id == item.id }
+                if (current != null && current.totalPages <= 0) {
+                    WebStore.updateItem(current.copy(totalPages = resolved, updatedAt = currentTimeMillis()))
+                }
+            }
+        } catch (_: Throwable) {}
     }
 
     suspend fun addCustomItem(

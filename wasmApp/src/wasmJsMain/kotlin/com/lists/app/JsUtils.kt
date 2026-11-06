@@ -3,6 +3,12 @@ package com.lists.app
 private fun jsDateNow(): Double = js("Date.now()")
 fun currentTimeMillis(): Long = jsDateNow().toLong()
 
+private fun jsFormatEpochToIsoDate(millis: Double): String = js("new Date(millis).toISOString().split('T')[0]")
+fun formatEpochToIsoDate(millis: Long): String = try { jsFormatEpochToIsoDate(millis.toDouble()) } catch (_: Throwable) { "" }
+
+private fun jsFormatDateTime(millis: Double): String = js("new Date(millis).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })")
+fun formatEpochToPrettyDateTime(millis: Long): String = try { jsFormatDateTime(millis.toDouble()) } catch (_: Throwable) { "" }
+
 private fun jsEncodeURIComponent(s: String): String = js("encodeURIComponent(s)")
 fun encodeURIComponent(s: String): String = jsEncodeURIComponent(s)
 

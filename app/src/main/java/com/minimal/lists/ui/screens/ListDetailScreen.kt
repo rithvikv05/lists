@@ -13,6 +13,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -42,6 +44,7 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,10 +62,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.QrCodeScanner
+import com.minimal.lists.data.api.SearchRepository
 import com.minimal.lists.data.db.ListItem
 import com.minimal.lists.data.model.Category
 import com.minimal.lists.data.model.RatingScaleOption
 import com.minimal.lists.data.repository.AppRepository
+import com.minimal.lists.data.sync.DriveSyncManager
+import com.minimal.lists.data.sync.GoogleSignInHelper
 import com.minimal.lists.ui.components.*
 import com.minimal.lists.ui.theme.*
 
@@ -75,6 +83,13 @@ enum class ItemStatusFilter(val displayName: String) {
     ALL("All"),
     DONE("Done"),
     REMAINING("Remaining")
+}
+
+enum class BookStatusFilter(val displayName: String) {
+    ALL("All"),
+    READ("Read"),
+    READING("Reading"),
+    TO_READ("To Read")
 }
 
 enum class ItemSortOption(val label: String) {
@@ -108,6 +123,29 @@ fun ListDetailScreen(
         mutableStateOf(try { ViewDisplayMode.valueOf(saved!!) } catch (_: Exception) { ViewDisplayMode.GRID })
     }
     var statusFilter by remember { mutableStateOf(ItemStatusFilter.ALL) }
+    var bookStatusFilter by remember { mutableStateOf(BookStatusFilter.ALL) }
+    var isSplitMenuOpen by remember { mutableStateOf(false) }
+    var showBarcodeScanner by remember { mutableStateOf(false) }
+    var showManualBookDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val syncManager = remember { DriveSyncManager(context) }
+    val signInHelper = remember { GoogleSignInHelper(context) }
+    var isRefreshing by remember { mutableStateOf(false) }
+
+    val onPullRefresh: () -> Unit = {
+        isRefreshing = true
+        triggerStrongTick(context)
+        scope.launch {
+            val account = signInHelper.getSignedInAccount()
+            if (account != null) {
+                syncManager.syncNow(account, repository)
+            } else {
+                kotlinx.coroutines.delay(500)
+            }
+            isRefreshing = false
+        }
+    }
+
     var sortOption by remember { mutableStateOf(ItemSortOption.DATE_ADDED_DESC) }
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -164,7 +202,7 @@ fun ListDetailScreen(
         RatingScaleOption.fromId(saved, defaultScale)
     }
 
-    val filteredItems = remember(rawItems, statusFilter, searchQuery) {
+    val filteredItems = remember(rawItems, statusFilter, bookStatusFilter, searchQuery, category) {
         var items = rawItems
         if (searchQuery.isNotBlank()) {
             items = items.filter {
@@ -172,10 +210,19 @@ fun ListDetailScreen(
                         it.creator.contains(searchQuery, ignoreCase = true)
             }
         }
-        when (statusFilter) {
-            ItemStatusFilter.ALL -> items
-            ItemStatusFilter.DONE -> items.filter { it.marked }
-            ItemStatusFilter.REMAINING -> items.filter { !it.marked }
+        if (category == Category.BOOK) {
+            when (bookStatusFilter) {
+                BookStatusFilter.ALL -> items
+                BookStatusFilter.READ -> items.filter { it.marked || (it.totalPages > 0 && it.currentPage >= it.totalPages) }
+                BookStatusFilter.READING -> items.filter { it.currentPage > 0 && !it.marked && (it.totalPages == 0 || it.currentPage < it.totalPages) }
+                BookStatusFilter.TO_READ -> items.filter { it.currentPage == 0 && !it.marked }
+            }
+        } else {
+            when (statusFilter) {
+                ItemStatusFilter.ALL -> items
+                ItemStatusFilter.DONE -> items.filter { it.marked }
+                ItemStatusFilter.REMAINING -> items.filter { !it.marked }
+            }
         }
     }
 
@@ -203,85 +250,24 @@ fun ListDetailScreen(
     val gridState = rememberLazyGridState()
     val listState = rememberLazyListState()
 
-    val scrollOffset by remember(displayMode) {
-        derivedStateOf {
-            when (displayMode) {
-                ViewDisplayMode.GRID -> if (gridState.firstVisibleItemIndex > 0) 500 else gridState.firstVisibleItemScrollOffset
-                ViewDisplayMode.LIST -> if (listState.firstVisibleItemIndex > 0) 500 else listState.firstVisibleItemScrollOffset
-            }
-        }
-    }
+    val horizontalPadding = if (isWideLayout) 24.dp else 16.dp
 
-    val density = LocalDensity.current
-    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val maxScrollPx = with(density) { 56.dp.toPx() }
-    val scrollProgress = (scrollOffset.toFloat() / maxScrollPx).coerceIn(0f, 1f)
-    val easedProgress = FastOutSlowInEasing.transform(scrollProgress)
-
-    val searchProgress by animateFloatAsState(
-        targetValue = if (isSearchActive) 1f else 0f,
-        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
-        label = "searchProgress"
-    )
-    val effectiveProgress = maxOf(searchProgress, easedProgress)
-    val titleX = if (isWideLayout) 20.dp else androidx.compose.ui.unit.lerp(16.dp, 56.dp, effectiveProgress)
-    val titleY = androidx.compose.ui.unit.lerp(statusBarTop + 68.dp, statusBarTop + 26.dp, effectiveProgress)
-    val titleFontSize = (28f - (28f - 18f) * effectiveProgress).sp
-    val titleLetterSpacing = ((-0.5f) * (1f - effectiveProgress)).sp
-    val titleMaxWidth = androidx.compose.ui.unit.lerp((screenWidthDp - 32).dp, (screenWidthDp - (if (isWideLayout) 120 else 170)).coerceAtLeast(140).dp, effectiveProgress)
-    val subtitleAlpha = (1f - effectiveProgress * 1.8f).coerceIn(0f, 1f)
-
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        floatingActionButton = {
-            if (selectedItemIds.isEmpty()) {
-                // 2D Minimal, Flush "Add Item" Box (No shadows, No + plus icon, centered text, matching New List and Create List)
-                Surface(
-                    onClick = {
-                        triggerStrongTick(context)
-                        onNavigateToAddItem(listId, null)
-                    },
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                shadowElevation = 0.dp,
-                modifier = Modifier
-                    .padding(bottom = 24.dp)
-                    .height(40.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
             ) {
-                Box(
-                    modifier = Modifier
-                        .padding(horizontal = 20.dp)
-                        .fillMaxHeight(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Add Item",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
+                if (isSearchActive) {
+                    focusManager.clearFocus()
+                    isSearchActive = false
+                    searchQuery = ""
                 }
-            }
-        }
-    }
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    if (isSearchActive) {
-                        focusManager.clearFocus()
-                        isSearchActive = false
-                        searchQuery = ""
-                    }
-                },
-            contentAlignment = Alignment.TopCenter
-        ) {
+            },
+        contentAlignment = Alignment.TopCenter
+    ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -458,15 +444,34 @@ fun ListDetailScreen(
                                 }
                             }
                         } else {
-                            IconButton(
-                                onClick = onNavigateBack,
-                                modifier = Modifier.size(40.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f, fill = false)
                             ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(22.dp)
+                                IconButton(
+                                    onClick = {
+                                        triggerStrongTick(context)
+                                        onNavigateBack.invoke()
+                                    },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = list?.name ?: "List",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    letterSpacing = (-0.5).sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -542,34 +547,6 @@ fun ListDetailScreen(
                     )
                 }
 
-                if (!isWideLayout && effectiveProgress < 0.99f) {
-                    val reservedHeight = androidx.compose.ui.unit.lerp(34.dp, 0.dp, effectiveProgress)
-                    val subHeight = androidx.compose.ui.unit.lerp(18.dp, 0.dp, effectiveProgress)
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(
-                                top = 0.dp,
-                                bottom = (4 * (1f - effectiveProgress)).dp
-                            )
-                    ) {
-                        Spacer(modifier = Modifier.height(reservedHeight))
-                        if (effectiveProgress < 0.95f) {
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Box(
-                                modifier = Modifier.height(subHeight),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Text(
-                                    text = "${rawItems.size} Items • ${rawItems.count { it.marked }} Done",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = subtitleAlpha)
-                                )
-                            }
-                        }
-                    }
-                }
-
                 // View Switcher & Quick Filter Row (Left: All, Done, Remaining tags; Right: Grid/List slider)
                 Row(
                     modifier = Modifier
@@ -578,35 +555,68 @@ fun ListDetailScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Left: Quick Filter Pills (All | Done | Remaining)
+                    // Left: Quick Filter Pills (Scrollable with weight, never squishes the view slider)
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(if (category == Category.BOOK) 5.dp else 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        ItemStatusFilter.entries.forEach { filter ->
-                            val isSelected = statusFilter == filter
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
-                                border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
-                                modifier = Modifier
-                                    .height(32.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable {
-                                        statusFilter = filter
-                                        triggerAsmrTick(context)
-                                    }
-                            ) {
-                                Box(
-                                    modifier = Modifier.padding(horizontal = 12.dp),
-                                    contentAlignment = Alignment.Center
+                        if (category == Category.BOOK) {
+                            BookStatusFilter.entries.forEach { filter ->
+                                val isSelected = bookStatusFilter == filter
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                                    border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            bookStatusFilter = filter
+                                            triggerAsmrTick(context)
+                                        }
                                 ) {
-                                    Text(
-                                        text = filter.displayName,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Box(
+                                        modifier = Modifier.padding(horizontal = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = filter.displayName,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            ItemStatusFilter.entries.forEach { filter ->
+                                val isSelected = statusFilter == filter
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                                    border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            statusFilter = filter
+                                            triggerAsmrTick(context)
+                                        }
+                                ) {
+                                    Box(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = filter.displayName,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -622,7 +632,9 @@ fun ListDetailScreen(
                             0.5.dp,
                             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
                         ),
-                        modifier = Modifier.height(34.dp)
+                        modifier = Modifier
+                            .height(34.dp)
+                            .wrapContentWidth()
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -675,13 +687,20 @@ fun ListDetailScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Media Items Display with completion circle toggle & automatic completed-to-bottom sorting
-                if (searchQuery.isNotBlank() && filteredItems.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = onPullRefresh,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    if (searchQuery.isNotBlank() && filteredItems.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -960,27 +979,54 @@ fun ListDetailScreen(
                     }
                 }
             }
+        }
 
-            // SINGLE TITLE THAT PHYSICALLY FLOWS AND SHRINKS/EXPANDS BETWEEN BODY AND HEADER (Phone / Portrait only)
-            if (!isWideLayout) {
-                val selectionFadeAlpha = if (selectedItemIds.isNotEmpty()) (1f - effectiveProgress * 1.5f).coerceIn(0f, 1f) else 1f
-                if (selectionFadeAlpha > 0f) {
-                    Text(
-                        text = list?.name ?: "List",
-                        fontSize = titleFontSize,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = titleLetterSpacing,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = selectionFadeAlpha),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .offset(x = titleX, y = titleY)
-                            .widthIn(max = titleMaxWidth)
-                    )
+        // Bottom Action Row matching CategoriesHomeScreen:
+        // Mobile: 16dp right end padding, 20dp vertical
+        // Tablet/Web: 24dp right end padding matching cards, 20dp vertical
+        if (selectedItemIds.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = horizontalPadding, vertical = 20.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        onClick = {
+                            triggerStrongTick(context)
+                            onNavigateToAddItem(listId, null)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        shadowElevation = 0.dp,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Add Item",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 72.dp)
+        )
     }
 
     // Sort Bottom Sheet
@@ -1509,6 +1555,48 @@ fun ListDetailScreen(
             },
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    if (showBarcodeScanner) {
+        BookBarcodeScannerModal(
+            onDismiss = { showBarcodeScanner = false },
+            onBarcodeDetected = { barcode ->
+                showBarcodeScanner = false
+                scope.launch {
+                    val searchRepo = SearchRepository()
+                    val result = searchRepo.lookupBookByIsbn(barcode)
+                    if (result != null) {
+                        repository.addItemFromSearch(listId, result)
+                        snackbarHostState.showSnackbar("Added “${result.title}”")
+                    } else {
+                        snackbarHostState.showSnackbar("ISBN not found. Try searching or enter manually.")
+                    }
+                }
+            }
+        )
+    }
+
+    if (showManualBookDialog) {
+        ManualBookEntryDialog(
+            onDismiss = { showManualBookDialog = false },
+            onSave = { title, author, isbn, totalPages, language, publisher, publishDate, coverUrl ->
+                showManualBookDialog = false
+                scope.launch {
+                    repository.addManualBookItem(
+                        listId = listId,
+                        title = title,
+                        author = author,
+                        isbn = isbn,
+                        totalPages = totalPages,
+                        language = language,
+                        publisher = publisher,
+                        publishDate = publishDate,
+                        coverUrl = coverUrl
+                    )
+                    snackbarHostState.showSnackbar("Added “$title”")
+                }
+            }
         )
     }
 }

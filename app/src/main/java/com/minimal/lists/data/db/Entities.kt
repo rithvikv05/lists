@@ -71,6 +71,10 @@ data class ListItem(
     val checkedEpisodesJson: String = "", // JSON array of checked episode keys e.g. ["S1E1", "S1E2"]
     val episodesDataJson: String = "", // cached JSON of episodes list
     val loggedMinutes: Int = 0, // Time logged in minutes (e.g., 525 min = 8h 45m)
+    val isbn: String = "", // ISBN-10 or ISBN-13
+    val bookLanguage: String = "", // Language code (e.g. en, fr, de, ja)
+    val publisher: String = "", // Book publisher
+    val readingSessionsJson: String = "", // Serialized JSON array of ReadingSession
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )

@@ -8,9 +8,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -28,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.ComposeViewport
 import com.lists.app.LocalWebContext
 import com.lists.app.WebContext
+import com.lists.app.data.model.Category
 import com.lists.app.data.repository.AppRepository
 import com.lists.app.data.store.WebStore
 import com.lists.app.data.sync.DriveSyncManager
@@ -41,7 +46,8 @@ import kotlinx.browser.document
 import kotlinx.coroutines.launch
 
 sealed class Screen {
-    object Lists : Screen()
+    object Home : Screen()
+    data class Lists(val categoryId: String? = null, val isArchive: Boolean = false) : Screen()
     data class ListDetail(val listId: Long) : Screen()
     data class AddItem(val listId: Long, val query: String? = null) : Screen()
     data class ItemDetail(val itemId: Long) : Screen()
@@ -105,8 +111,8 @@ fun main() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val backStack = remember { mutableStateListOf<Screen>(Screen.Lists) }
-                    val currentScreen = backStack.lastOrNull() ?: Screen.Lists
+                    val backStack = remember { mutableStateListOf<Screen>(Screen.Home) }
+                    val currentScreen = backStack.lastOrNull() ?: Screen.Home
                     val coroutineScope = rememberCoroutineScope()
 
                     var searchTriggerHome by remember { mutableStateOf(0) }
@@ -128,7 +134,7 @@ fun main() {
                         ) {
                             Row(modifier = Modifier.fillMaxSize()) {
                                 if (wideLayout) {
-                                    val showBack = currentScreen is Screen.ItemDetail || currentScreen is Screen.AddItem
+                                    val showBack = currentScreen is Screen.ItemDetail || currentScreen is Screen.AddItem || currentScreen is Screen.Lists
 
                                     NavigationRail(
                                         containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -168,8 +174,10 @@ fun main() {
                                                             } else if (currentScreen is Screen.ListDetail) {
                                                                 searchTriggerDetail++
                                                             } else {
-                                                                backStack.removeAll { it !is Screen.Lists }
-                                                                searchTriggerHome++
+                                                                backStack.removeAll { it !is Screen.Home }
+                                                                if (backStack.isEmpty()) {
+                                                                    backStack.add(Screen.Home)
+                                                                }
                                                             }
                                                         },
                                                         shape = CircleShape,
@@ -190,19 +198,22 @@ fun main() {
                                         }
                                     ) {
                                         NavigationRailItem(
-                                            selected = currentScreen is Screen.Lists,
+                                            selected = currentScreen is Screen.Home,
                                             onClick = {
-                                                if (currentScreen !is Screen.Lists) {
-                                                    backStack.removeAll { it !is Screen.Lists }
+                                                if (currentScreen !is Screen.Home) {
+                                                    backStack.removeAll { it !is Screen.Home }
+                                                    if (backStack.isEmpty()) {
+                                                        backStack.add(Screen.Home)
+                                                    }
                                                 }
                                             },
                                             icon = {
                                                 Icon(
-                                                    imageVector = if (currentScreen is Screen.Lists) Icons.AutoMirrored.Filled.List else Icons.AutoMirrored.Outlined.List,
-                                                    contentDescription = "Lists"
+                                                    imageVector = if (currentScreen is Screen.Home) Icons.Filled.Home else Icons.Outlined.Home,
+                                                    contentDescription = "Home"
                                                 )
                                             },
-                                            label = { Text("Lists") }
+                                            label = { Text("Home") }
                                         )
 
                                         NavigationRailItem(
@@ -270,6 +281,21 @@ fun main() {
 
                                         Spacer(modifier = Modifier.weight(1f))
 
+                                        val isArchive = currentScreen is Screen.Lists && currentScreen.isArchive
+                                        NavigationRailItem(
+                                            selected = isArchive,
+                                            onClick = {
+                                                backStack.add(Screen.Lists(isArchive = true))
+                                            },
+                                            icon = {
+                                                Icon(
+                                                    imageVector = if (isArchive) Icons.Filled.Archive else Icons.Outlined.Archive,
+                                                    contentDescription = "Archive"
+                                                )
+                                            },
+                                            label = { Text("Archive") }
+                                        )
+
                                         NavigationRailItem(
                                             selected = false,
                                             onClick = {
@@ -299,9 +325,30 @@ fun main() {
                                         .fillMaxHeight()
                                 ) {
                                     when (currentScreen) {
+                                        is Screen.Home -> {
+                                            CategoriesHomeScreen(
+                                                repository = repository,
+                                                onNavigateToCategory = { cat ->
+                                                    backStack.add(Screen.Lists(categoryId = cat.id))
+                                                },
+                                                onNavigateToArchive = {
+                                                    backStack.add(Screen.Lists(isArchive = true))
+                                                },
+                                                onNavigateToSettings = {
+                                                    backStack.add(Screen.Settings)
+                                                },
+                                                searchTrigger = searchTriggerHome
+                                            )
+                                        }
+
                                         is Screen.Lists -> {
                                             ListsScreen(
                                                 repository = repository,
+                                                initialCategory = currentScreen.categoryId?.let { Category.fromId(it) },
+                                                initialArchive = currentScreen.isArchive,
+                                                onNavigateBack = {
+                                                    if (backStack.size > 1) backStack.removeAt(backStack.size - 1)
+                                                },
                                                 onNavigateToListDetail = { listId ->
                                                     searchTriggerDetail = 0
                                                     backStack.add(Screen.ListDetail(listId))
