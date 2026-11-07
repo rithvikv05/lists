@@ -177,6 +177,11 @@ fun AppNavigation(
     val wideLayout = isTablet
     var searchTriggerHome by remember { mutableStateOf(0) }
     var searchTriggerDetail by remember { mutableStateOf(0) }
+    var isSearchActive by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentRoute) {
+        isSearchActive = false
+    }
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -229,14 +234,14 @@ fun AppNavigation(
                                     }
                                 },
                                 shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                color = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
                                 modifier = Modifier.size(44.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Default.Search,
                                         contentDescription = "Search",
-                                        tint = MaterialTheme.colorScheme.primary,
+                                        tint = if (isSearchActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
@@ -389,7 +394,8 @@ fun AppNavigation(
                     onNavigateToSettings = {
                         navController.navigate("settings")
                     },
-                    searchTrigger = searchTriggerHome
+                    searchTrigger = searchTriggerHome,
+                    onSearchActiveChange = { isSearchActive = it }
                 )
             }
 
@@ -426,7 +432,8 @@ fun AppNavigation(
                     onNavigateToSettings = {
                         navController.navigate("settings")
                     },
-                    searchTrigger = searchTriggerHome
+                    searchTrigger = searchTriggerHome,
+                    onSearchActiveChange = { isSearchActive = it }
                 )
             }
 
@@ -445,7 +452,8 @@ fun AppNavigation(
                     onNavigateToSettings = {
                         navController.navigate("settings")
                     },
-                    searchTrigger = searchTriggerHome
+                    searchTrigger = searchTriggerHome,
+                    onSearchActiveChange = { isSearchActive = it }
                 )
             }
 
@@ -472,7 +480,8 @@ fun AppNavigation(
                             navController.navigate("addItem/$id?query=${android.net.Uri.encode(query)}")
                         }
                     },
-                    searchTrigger = searchTriggerDetail
+                    searchTrigger = searchTriggerDetail,
+                    onSearchActiveChange = { isSearchActive = it }
                 )
             }
 

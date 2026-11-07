@@ -574,6 +574,20 @@ class SearchRepository {
             lower.contains("(disambiguation)")) {
             return false
         }
+        if (item.category == Category.GAME) {
+            // Filter out store price duplicates that have no real game overview
+            val c = item.creator.trim()
+            if (c.startsWith("$") || c.startsWith("€") || c.startsWith("£") || c.startsWith("¥") || c.startsWith("₹") ||
+                c.matches(Regex("""^[\$€£¥₹\d].*"""))) {
+                return false
+            }
+            if (item.overview.isBlank() && (item.externalUrl.contains("steampowered.com") || item.coverUrl.contains("steamstatic.com"))) {
+                return false
+            }
+            if (lower.contains("soundtrack") || lower.contains("remastered soundtrack") || lower.contains("songs of the past")) {
+                return false
+            }
+        }
         return item.coverUrl.isNotBlank() || item.overview.isNotBlank() ||
                item.creator.isNotBlank() || item.releaseYear.isNotBlank()
     }
@@ -655,8 +669,12 @@ class SearchRepository {
                     fetchFromRemoteEngine(searchCleanQuery, category, subFilter, effectiveYear, langFilter)
                 }
                 if (!remoteResults.isNullOrEmpty()) {
-                    searchCache.put(cacheKey, remoteResults)
-                    return@async remoteResults
+                    val validRemote = remoteResults.filter { isValidSearchResult(it) }
+                    val deduplicatedRemote = deduplicateSearchResults(validRemote)
+                    if (deduplicatedRemote.isNotEmpty()) {
+                        searchCache.put(cacheKey, deduplicatedRemote)
+                        return@async deduplicatedRemote
+                    }
                 }
 
                 // Seamless fallback to embedded local providers if remote is unavailable or slow
@@ -2073,7 +2091,7 @@ class SearchRepository {
         if (cleanIsbn.isNotBlank()) {
             try {
                 val direct = lookupBookByIsbn(cleanIsbn)
-                if (direct != null && direct.totalPages > 0) {
+                if (direct != null && direct.totalPages in 45..2500) {
                     return@withContext direct.totalPages
                 }
             } catch (_: Exception) {}
@@ -2088,7 +2106,7 @@ class SearchRepository {
                 "intitle:\"$cleanTitle\""
             }
             val encoded = URLEncoder.encode(q, "UTF-8")
-            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=5"
+            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=10"
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", "ListsApp/1.0")
@@ -2100,10 +2118,18 @@ class SearchRepository {
                     val json = JSONObject(body)
                     val items = json.optJSONArray("items")
                     if (items != null) {
+                        val validPages = mutableListOf<Int>()
                         for (i in 0 until items.length()) {
                             val vol = items.getJSONObject(i).optJSONObject("volumeInfo") ?: continue
-                            val pages = vol.optInt("pageCount", 0).takeIf { it > 0 } ?: vol.optInt("printedPageCount", 0)
-                            if (pages > 0) return@withContext pages
+                            val volTitle = vol.optString("title", "")
+                            if (volTitle.contains("summary", ignoreCase = true) || volTitle.contains("study guide", ignoreCase = true)) continue
+                            val pages = vol.optInt("pageCount", 0).takeIf { it in 45..2500 }
+                                ?: vol.optInt("printedPageCount", 0).takeIf { it in 45..2500 }
+                            if (pages != null) validPages.add(pages)
+                        }
+                        if (validPages.isNotEmpty()) {
+                            validPages.sort()
+                            return@withContext validPages[validPages.size / 2]
                         }
                     }
                 }
@@ -2112,7 +2138,7 @@ class SearchRepository {
 
         try {
             val encoded = URLEncoder.encode(title.trim(), "UTF-8")
-            val url = "https://openlibrary.org/search.json?q=$encoded&fields=number_of_pages_median,number_of_pages&limit=5"
+            val url = "https://openlibrary.org/search.json?q=$encoded&fields=number_of_pages_median,number_of_pages&limit=8"
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", "ListsApp/1.0")
@@ -2126,9 +2152,20 @@ class SearchRepository {
                     if (docs != null) {
                         for (i in 0 until docs.length()) {
                             val doc = docs.getJSONObject(i)
-                            val pages = doc.optInt("number_of_pages_median", 0).takeIf { it > 0 }
-                                ?: doc.optInt("number_of_pages", 0)
-                            if (pages > 0) return@withContext pages
+                            val median = doc.optInt("number_of_pages_median", 0).takeIf { it in 45..2500 }
+                            if (median != null) return@withContext median
+
+                            val pagesArr = doc.optJSONArray("number_of_pages")
+                            if (pagesArr != null) {
+                                val validPages = (0 until pagesArr.length())
+                                    .mapNotNull { idx -> pagesArr.optInt(idx, 0).takeIf { it in 45..2500 } }
+                                    .sorted()
+                                if (validPages.isNotEmpty()) {
+                                    return@withContext validPages[validPages.size / 2]
+                                }
+                            }
+                            val singlePage = doc.optInt("number_of_pages", 0).takeIf { it in 45..2500 }
+                            if (singlePage != null) return@withContext singlePage
                         }
                     }
                 }
@@ -2287,9 +2324,15 @@ class SearchRepository {
                         val year = doc.optString("first_publish_year")
                         val coverId = doc.optInt("cover_i", 0)
                         val cover = if (coverId > 0) "https://covers.openlibrary.org/b/id/$coverId-L.jpg" else ""
-                        val pages = doc.optInt("number_of_pages_median", 0).takeIf { it > 0 }
-                            ?: doc.optInt("number_of_pages", 0).takeIf { it > 0 }
-                            ?: doc.optJSONArray("number_of_pages")?.optInt(0, 0)
+                        val pagesArr = doc.optJSONArray("number_of_pages")
+                        val validPages = if (pagesArr != null) {
+                            (0 until pagesArr.length()).mapNotNull { idx ->
+                                pagesArr.optInt(idx, 0).takeIf { it in 45..2500 }
+                            }.sorted()
+                        } else emptyList()
+                        val pages = doc.optInt("number_of_pages_median", 0).takeIf { it in 45..2500 }
+                            ?: (if (validPages.isNotEmpty()) validPages[validPages.size / 2] else null)
+                            ?: doc.optInt("number_of_pages", 0).takeIf { it in 45..2500 }
                             ?: 0
                         val rating = doc.optDouble("ratings_average", 0.0).toFloat() * 2f
                         val key = doc.optString("key")

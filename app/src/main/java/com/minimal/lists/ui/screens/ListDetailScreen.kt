@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
@@ -87,9 +88,9 @@ enum class ItemStatusFilter(val displayName: String) {
 
 enum class BookStatusFilter(val displayName: String) {
     ALL("All"),
-    READ("Read"),
     READING("Reading"),
-    TO_READ("To Read")
+    TO_READ("To Read"),
+    READ("Read")
 }
 
 enum class ItemSortOption(val label: String) {
@@ -109,7 +110,8 @@ fun ListDetailScreen(
     onNavigateToAddItem: (Long, String?) -> Unit,
     searchTrigger: Int = 0,
     searchRequested: Boolean = false,
-    onSearchHandled: (() -> Unit)? = null
+    onSearchHandled: (() -> Unit)? = null,
+    onSearchActiveChange: ((Boolean) -> Unit)? = null
 ) {
     val list by repository.getList(listId).collectAsState(initial = null)
     val rawItems by repository.getItems(listId).collectAsState(initial = emptyList())
@@ -172,6 +174,10 @@ fun ListDetailScreen(
             onSearchHandled?.invoke()
         }
     }
+
+    LaunchedEffect(isSearchActive) {
+        onSearchActiveChange?.invoke(isSearchActive)
+    }
     var showSortSheet by remember { mutableStateOf(false) }
     var showOptionsSheet by remember { mutableStateOf(false) }
     var showEditListModal by remember { mutableStateOf(false) }
@@ -226,7 +232,7 @@ fun ListDetailScreen(
         }
     }
 
-    val (sortedPinned, sortedRemaining, sortedCompleted) = remember(filteredItems, sortOption) {
+    val (sortedPinned, sortedRemaining, sortedCompleted) = remember(filteredItems, sortOption, category) {
         fun sortGroup(group: List<ListItem>): List<ListItem> {
             return when (sortOption) {
                 ItemSortOption.DATE_ADDED_DESC -> group.sortedByDescending { it.createdAt }
@@ -235,10 +241,24 @@ fun ListDetailScreen(
                 ItemSortOption.YEAR_DESC -> group.sortedByDescending { it.releaseYear }
             }
         }
-        val pinned = sortGroup(filteredItems.filter { it.pinned })
-        val remaining = sortGroup(filteredItems.filter { !it.pinned && !it.marked })
-        val completed = sortGroup(filteredItems.filter { !it.pinned && it.marked })
-        Triple(pinned, remaining, completed)
+        if (category == Category.BOOK) {
+            // Books: Reading on top, then To Read, then Read
+            val reading = sortGroup(filteredItems.filter {
+                (it.pinned || (it.currentPage > 0 && (it.totalPages == 0 || it.currentPage < it.totalPages))) && !it.marked
+            })
+            val toRead = sortGroup(filteredItems.filter {
+                !it.marked && !it.pinned && it.currentPage == 0
+            })
+            val read = sortGroup(filteredItems.filter {
+                it.marked || (it.totalPages > 0 && it.currentPage >= it.totalPages)
+            })
+            Triple(reading, toRead, read)
+        } else {
+            val pinned = sortGroup(filteredItems.filter { it.pinned })
+            val remaining = sortGroup(filteredItems.filter { !it.pinned && !it.marked })
+            val completed = sortGroup(filteredItems.filter { !it.pinned && it.marked })
+            Triple(pinned, remaining, completed)
+        }
     }
 
     val configuration = LocalConfiguration.current
@@ -364,7 +384,7 @@ fun ListDetailScreen(
                                 )
                             }
 
-                            // Bulk Pin / Unpin
+                            // Bulk Pin / Unpin (or Mark Reading for Books)
                             IconButton(
                                 onClick = {
                                     triggerStrongTick(context)
@@ -375,12 +395,21 @@ fun ListDetailScreen(
                                 },
                                 modifier = Modifier.size(34.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.PushPin,
-                                    contentDescription = if (anyUnpinned) "Pin" else "Unpin",
-                                    tint = if (anyUnpinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                    modifier = Modifier.size(19.dp)
-                                )
+                                if (category == Category.BOOK) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                                        contentDescription = if (anyUnpinned) "Mark as Reading" else "Remove from Reading",
+                                        tint = if (anyUnpinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.PushPin,
+                                        contentDescription = if (anyUnpinned) "Pin" else "Unpin",
+                                        tint = if (anyUnpinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
                             }
 
                             // Bulk Delete
@@ -738,7 +767,12 @@ fun ListDetailScreen(
                         contentPadding = PaddingValues(bottom = 96.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        // 1. Pinned Items
+                        // 1. Reading (Books) or Pinned Items
+                        if (category == Category.BOOK && sortedPinned.isNotEmpty()) {
+                            item(key = "divider_reading", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                                SectionAccentDivider(label = "Reading")
+                            }
+                        }
                         if (sortedPinned.isNotEmpty()) {
                             items(sortedPinned, key = { "pinned_${it.id}" }) { item ->
                                 val isSelected = selectedItemIds.contains(item.id)
@@ -772,10 +806,10 @@ fun ListDetailScreen(
                             }
                         }
 
-                        // Subtle accented divider between Pinned and To-Be-Done
+                        // Subtle accented divider between Pinned / Reading and To-Be-Done / To Read
                         if (sortedPinned.isNotEmpty() && sortedRemaining.isNotEmpty()) {
                             item(key = "divider_pinned", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                                SectionAccentDivider()
+                                SectionAccentDivider(label = if (category == Category.BOOK) "To Read" else null)
                             }
                         }
 
@@ -861,7 +895,12 @@ fun ListDetailScreen(
                         contentPadding = PaddingValues(bottom = 96.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        // 1. Pinned Items
+                        // 1. Reading (Books) or Pinned Items
+                        if (category == Category.BOOK && sortedPinned.isNotEmpty()) {
+                            item(key = "divider_reading") {
+                                SectionAccentDivider(label = "Reading")
+                            }
+                        }
                         if (sortedPinned.isNotEmpty()) {
                             items(sortedPinned, key = { "pinned_${it.id}" }) { item ->
                                 val isSelected = selectedItemIds.contains(item.id)
@@ -895,10 +934,10 @@ fun ListDetailScreen(
                             }
                         }
 
-                        // Subtle accented divider between Pinned and To-Be-Done
+                        // Subtle accented divider between Pinned / Reading and To-Be-Done / To Read
                         if (sortedPinned.isNotEmpty() && sortedRemaining.isNotEmpty()) {
                             item(key = "divider_pinned") {
-                                SectionAccentDivider()
+                                SectionAccentDivider(label = if (category == Category.BOOK) "To Read" else null)
                             }
                         }
 

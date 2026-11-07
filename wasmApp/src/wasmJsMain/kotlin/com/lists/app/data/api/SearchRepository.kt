@@ -317,6 +317,20 @@ class SearchRepository {
             lower.contains("(disambiguation)")) {
             return false
         }
+        if (item.category == Category.GAME) {
+            // Filter out store price duplicates that have no real game overview
+            val c = item.creator.trim()
+            if (c.startsWith("$") || c.startsWith("€") || c.startsWith("£") || c.startsWith("¥") || c.startsWith("₹") ||
+                c.matches(Regex("""^[\$€£¥₹\d].*"""))) {
+                return false
+            }
+            if (item.overview.isBlank() && (item.externalUrl.contains("steampowered.com") || item.coverUrl.contains("steamstatic.com"))) {
+                return false
+            }
+            if (lower.contains("soundtrack") || lower.contains("remastered soundtrack") || lower.contains("songs of the past")) {
+                return false
+            }
+        }
         return item.coverUrl.isNotBlank() || item.overview.isNotBlank() ||
                item.creator.isNotBlank() || item.releaseYear.isNotBlank()
     }
@@ -446,8 +460,12 @@ class SearchRepository {
                     fetchFromRemoteEngine(searchCleanQuery, category, subFilter, effectiveYear, selectedLanguage)
                 }
                 if (!remoteResults.isNullOrEmpty()) {
-                    searchCache[cacheKey] = remoteResults
-                    return@async remoteResults
+                    val validRemote = remoteResults.filter { isValidSearchResult(it) }
+                    val deduplicatedRemote = deduplicate(validRemote)
+                    if (deduplicatedRemote.isNotEmpty()) {
+                        searchCache[cacheKey] = deduplicatedRemote
+                        return@async deduplicatedRemote
+                    }
                 }
 
                 // Seamless fallback to embedded local providers if remote is unavailable
@@ -738,32 +756,48 @@ class SearchRepository {
             val cleanAuthor = creator.split(",", "/").firstOrNull()?.trim() ?: ""
             val q = if (cleanAuthor.isNotBlank()) "intitle:\"$cleanTitle\" inauthor:\"$cleanAuthor\"" else "intitle:\"$cleanTitle\""
             val encoded = encodeURIComponent(q)
-            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=5"
+            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=10"
             val response = client.get(url).bodyAsText()
             val root = json.parseToJsonElement(response).jsonObject
             val items = root["items"]?.jsonArray
             if (items != null) {
+                val validPages = mutableListOf<Int>()
                 for (elem in items) {
                     val vol = elem.jsonObject["volumeInfo"]?.jsonObject ?: continue
-                    val pages = vol["pageCount"]?.jsonPrimitive?.intOrNull
-                        ?: vol["printedPageCount"]?.jsonPrimitive?.intOrNull ?: 0
-                    if (pages > 0) return pages
+                    val volTitle = vol["title"]?.jsonPrimitive?.contentOrNull ?: ""
+                    if (volTitle.contains("summary", ignoreCase = true) || volTitle.contains("study guide", ignoreCase = true)) continue
+                    val pages = vol["pageCount"]?.jsonPrimitive?.intOrNull?.takeIf { it in 45..2500 }
+                        ?: vol["printedPageCount"]?.jsonPrimitive?.intOrNull?.takeIf { it in 45..2500 }
+                    if (pages != null) validPages.add(pages)
+                }
+                if (validPages.isNotEmpty()) {
+                    validPages.sort()
+                    return validPages[validPages.size / 2]
                 }
             }
         } catch (_: Throwable) {}
 
         try {
             val encoded = encodeURIComponent(title.trim())
-            val url = "https://openlibrary.org/search.json?q=$encoded&fields=number_of_pages_median,number_of_pages&limit=5"
+            val url = "https://openlibrary.org/search.json?q=$encoded&fields=number_of_pages_median,number_of_pages&limit=8"
             val response = client.get(url).bodyAsText()
             val root = json.parseToJsonElement(response).jsonObject
             val docs = root["docs"]?.jsonArray
             if (docs != null) {
                 for (elem in docs) {
                     val doc = elem.jsonObject
-                    val pages = doc["number_of_pages_median"]?.jsonPrimitive?.intOrNull
-                        ?: doc["number_of_pages"]?.jsonPrimitive?.intOrNull ?: 0
-                    if (pages > 0) return pages
+                    val median = doc["number_of_pages_median"]?.jsonPrimitive?.intOrNull?.takeIf { it in 45..2500 }
+                    if (median != null) return median
+
+                    val pagesArr = doc["number_of_pages"]?.jsonArray
+                    if (pagesArr != null) {
+                        val validPages = pagesArr.mapNotNull { it.jsonPrimitive.intOrNull?.takeIf { p -> p in 45..2500 } }.sorted()
+                        if (validPages.isNotEmpty()) {
+                            return validPages[validPages.size / 2]
+                        }
+                    }
+                    val singlePage = doc["number_of_pages"]?.jsonPrimitive?.intOrNull?.takeIf { it in 45..2500 }
+                    if (singlePage != null) return singlePage
                 }
             }
         } catch (_: Throwable) {}
@@ -838,8 +872,12 @@ class SearchRepository {
                     val coverI = obj["cover_i"]?.jsonPrimitive?.contentOrNull
                     val coverUrl = if (coverI != null) "https://covers.openlibrary.org/b/id/$coverI-L.jpg" else ""
                     val key = obj["key"]?.jsonPrimitive?.content ?: ""
-                    val pages = obj["number_of_pages_median"]?.jsonPrimitive?.intOrNull
-                        ?: obj["number_of_pages"]?.jsonPrimitive?.intOrNull ?: 0
+                    val pagesArr = obj["number_of_pages"]?.jsonArray
+                    val validPages = pagesArr?.mapNotNull { it.jsonPrimitive.intOrNull?.takeIf { p -> p in 45..2500 } }?.sorted() ?: emptyList()
+                    val pages = obj["number_of_pages_median"]?.jsonPrimitive?.intOrNull?.takeIf { it in 45..2500 }
+                        ?: (if (validPages.isNotEmpty()) validPages[validPages.size / 2] else null)
+                        ?: obj["number_of_pages"]?.jsonPrimitive?.intOrNull?.takeIf { it in 45..2500 }
+                        ?: 0
                     val publisher = obj["publisher"]?.jsonArray?.firstOrNull()?.jsonPrimitive?.contentOrNull ?: ""
 
                     results.add(

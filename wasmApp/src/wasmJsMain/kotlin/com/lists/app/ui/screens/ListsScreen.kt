@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -88,7 +89,8 @@ fun ListsScreen(
     onNavigateToSettings: (() -> Unit)? = null,
     searchTrigger: Int = 0,
     searchRequested: Boolean = false,
-    onSearchHandled: (() -> Unit)? = null
+    onSearchHandled: (() -> Unit)? = null,
+    onSearchActiveChange: ((Boolean) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -133,11 +135,17 @@ fun ListsScreen(
         }
     }
 
+    LaunchedEffect(showSearchBar) {
+        onSearchActiveChange?.invoke(showSearchBar)
+    }
+
     var isRefreshing by remember { mutableStateOf(false) }
     val syncManager = remember { DriveSyncManager(context) }
     val signInHelper = remember { GoogleSignInHelper(context) }
     val syncStatus by DriveSyncManager.syncStatus.collectAsState()
-    var signedInAccount by remember { mutableStateOf(signInHelper.getSignedInAccount()) }
+    val currentAccount = remember(syncStatus) { signInHelper.getSignedInAccount() }
+    val isConnected = currentAccount != null
+    val isSynced = syncManager.lastSyncTimestamp > 0 || syncStatus is DriveSyncManager.SyncStatus.Success
 
     val onPullRefresh: () -> Unit = {
         isRefreshing = true
@@ -174,7 +182,6 @@ fun ListsScreen(
     }
 
     LaunchedEffect(Unit) {
-        signedInAccount = signInHelper.getSignedInAccount()
         val saved = uiPrefs.getString("home_layout_mode", HomeLayoutMode.DISCRETE.name)
         homeLayoutMode = try { HomeLayoutMode.valueOf(saved ?: HomeLayoutMode.DISCRETE.name) }
         catch (_: Exception) { HomeLayoutMode.DISCRETE }
@@ -621,18 +628,20 @@ fun ListsScreen(
                                             )
                                         } else {
                                             Icon(
-                                                imageVector = if (signedInAccount != null) Icons.Default.Cloud else Icons.Outlined.Cloud,
+                                                imageVector = if (isConnected) Icons.Default.Cloud else Icons.Outlined.Cloud,
                                                 contentDescription = "Sync",
-                                                tint = if (signedInAccount != null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                                                tint = if (isConnected) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                                                 modifier = Modifier.size(22.dp)
                                             )
-                                            if (signedInAccount != null && syncManager.lastSyncTimestamp > 0) {
+                                            if (isConnected && isSynced) {
                                                 Box(
                                                     modifier = Modifier
                                                         .align(Alignment.TopEnd)
-                                                        .size(6.dp)
+                                                        .offset(x = 2.dp, y = (-2).dp)
+                                                        .size(7.dp)
                                                         .clip(CircleShape)
                                                         .background(Color(0xFF00E676))
+                                                        .border(1.dp, MaterialTheme.colorScheme.surface, CircleShape)
                                                 )
                                             }
                                         }

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsNone
@@ -401,31 +402,71 @@ fun ItemDetailScreen(
                     }
                 }
 
-                Surface(
-                    onClick = {
-                        showOptionsSheet = false
-                        triggerAsmrTick(context)
-                        scope.launch { repository.toggleItemPinned(currentItem) }
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                // Option 2: Pin / Unpin (or Reading status for Books)
+                if (category == Category.BOOK) {
+                    val isReading = currentItem.pinned || (currentItem.currentPage > 0 && !currentItem.marked)
+                    Surface(
+                        onClick = {
+                            showOptionsSheet = false
+                            triggerAsmrTick(context)
+                            val newPinned = !isReading
+                            scope.launch {
+                                repository.updateItem(
+                                    currentItem.copy(
+                                        pinned = newPinned,
+                                        marked = if (newPinned) false else currentItem.marked
+                                    )
+                                )
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            Icons.Default.PushPin,
-                            contentDescription = null,
-                            tint = if (currentItem.pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = if (currentItem.pinned) "Unpin from Top" else "Pin to Top",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.MenuBook,
+                                contentDescription = null,
+                                tint = if (isReading) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = if (isReading) "Remove from Currently Reading" else "Mark as Currently Reading",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                } else {
+                    Surface(
+                        onClick = {
+                            showOptionsSheet = false
+                            triggerAsmrTick(context)
+                            scope.launch { repository.toggleItemPinned(currentItem) }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.PushPin,
+                                contentDescription = null,
+                                tint = if (currentItem.pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = if (currentItem.pinned) "Unpin from Top" else "Pin to Top",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
 
@@ -852,10 +893,53 @@ fun UnifiedTopHeroSection(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (category == Category.BOOK) {
+                            val isReading = item.pinned || (item.currentPage > 0 && !item.marked)
+                            Surface(
+                                onClick = {
+                                    triggerAsmrTick(context)
+                                    val newPinned = !isReading
+                                    scope.launch {
+                                        repository.updateItem(
+                                            item.copy(
+                                                pinned = newPinned,
+                                                marked = if (newPinned) false else item.marked
+                                            )
+                                        )
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isReading) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                contentColor = if (isReading) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                border = BorderStroke(1.dp, if (isReading) Color.Transparent else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(36.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    Text(
+                                        text = if (isReading) "Reading" else "Mark as Reading",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+
                         Surface(
                             onClick = {
                                 triggerStrongTick(context)
-                                scope.launch { repository.toggleItemMarked(item) }
+                                scope.launch {
+                                    if (!item.marked && item.pinned && category == Category.BOOK) {
+                                        repository.updateItem(item.copy(marked = true, pinned = false))
+                                    } else {
+                                        repository.toggleItemMarked(item)
+                                    }
+                                }
                             },
                             shape = RoundedCornerShape(10.dp),
                             color = if (item.marked) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
@@ -961,10 +1045,53 @@ fun UnifiedTopHeroSection(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    if (category == Category.BOOK) {
+                        val isReading = item.pinned || (item.currentPage > 0 && !item.marked)
+                        Surface(
+                            onClick = {
+                                triggerAsmrTick(context)
+                                val newPinned = !isReading
+                                scope.launch {
+                                    repository.updateItem(
+                                        item.copy(
+                                            pinned = newPinned,
+                                            marked = if (newPinned) false else item.marked
+                                        )
+                                    )
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isReading) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                            contentColor = if (isReading) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                            border = BorderStroke(1.dp, if (isReading) Color.Transparent else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Text(
+                                    text = if (isReading) "Reading" else "Mark as Reading",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+
                     Surface(
                         onClick = {
                             triggerStrongTick(context)
-                            scope.launch { repository.toggleItemMarked(item) }
+                            scope.launch {
+                                if (!item.marked && item.pinned && category == Category.BOOK) {
+                                    repository.updateItem(item.copy(marked = true, pinned = false))
+                                } else {
+                                    repository.toggleItemMarked(item)
+                                }
+                            }
                         },
                         shape = RoundedCornerShape(10.dp),
                         color = if (item.marked) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,

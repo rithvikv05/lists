@@ -94,7 +94,20 @@ function parseOpenLibraryDoc(doc: any): BookMetadata | null {
 
   const publisher = Array.isArray(doc.publisher) ? String(doc.publisher[0]).trim() : undefined;
   const publishedYear = doc.first_publish_year ? String(doc.first_publish_year) : undefined;
-  const totalPages = doc.number_of_pages_median || doc.number_of_pages || undefined;
+  let totalPages: number | undefined = undefined;
+  if (typeof doc.number_of_pages_median === 'number' && doc.number_of_pages_median >= 45 && doc.number_of_pages_median <= 2500) {
+    totalPages = doc.number_of_pages_median;
+  } else if (Array.isArray(doc.number_of_pages)) {
+    const valid = (doc.number_of_pages as any[])
+      .map(p => typeof p === 'number' ? p : parseInt(String(p), 10))
+      .filter(p => !isNaN(p) && p >= 45 && p <= 2500)
+      .sort((a, b) => a - b);
+    if (valid.length > 0) {
+      totalPages = valid[Math.floor(valid.length / 2)];
+    }
+  } else if (typeof doc.number_of_pages === 'number' && doc.number_of_pages >= 45 && doc.number_of_pages <= 2500) {
+    totalPages = doc.number_of_pages;
+  }
 
   const subjects: string[] = Array.isArray(doc.subject)
     ? doc.subject.slice(0, 20).map((s: any) => String(s).trim()).filter(Boolean)

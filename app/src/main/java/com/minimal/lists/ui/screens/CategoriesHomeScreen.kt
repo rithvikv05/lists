@@ -5,6 +5,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -59,7 +60,8 @@ fun CategoriesHomeScreen(
     onNavigateToCategory: (Category) -> Unit,
     onNavigateToArchive: () -> Unit,
     onNavigateToSettings: (() -> Unit)? = null,
-    searchTrigger: Int = 0
+    searchTrigger: Int = 0,
+    onSearchActiveChange: ((Boolean) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -97,18 +99,30 @@ fun CategoriesHomeScreen(
     var showSearchBar by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
+    var lastTrigger by remember { mutableStateOf(searchTrigger) }
     LaunchedEffect(searchTrigger) {
-        if (searchTrigger > 0) {
-            showSearchBar = true
+        if (searchTrigger != lastTrigger) {
+            lastTrigger = searchTrigger
+            showSearchBar = !showSearchBar
+            if (!showSearchBar) {
+                focusManager.clearFocus()
+                searchQuery = ""
+            }
         }
+    }
+
+    LaunchedEffect(showSearchBar) {
+        onSearchActiveChange?.invoke(showSearchBar)
     }
 
     // Google Drive Sync
     var isRefreshing by remember { mutableStateOf(false) }
     val syncManager = remember { DriveSyncManager(context) }
     val signInHelper = remember { GoogleSignInHelper(context) }
-    var signedInAccount by remember { mutableStateOf(signInHelper.getSignedInAccount()) }
     val syncStatus by DriveSyncManager.syncStatus.collectAsState()
+    val currentAccount = remember(syncStatus) { signInHelper.getSignedInAccount() }
+    val isConnected = currentAccount != null
+    val isSynced = syncManager.lastSyncTimestamp > 0 || syncStatus is DriveSyncManager.SyncStatus.Success
 
     val onPullRefresh: () -> Unit = {
         isRefreshing = true
@@ -125,7 +139,6 @@ fun CategoriesHomeScreen(
     }
 
     LaunchedEffect(Unit) {
-        signedInAccount = signInHelper.getSignedInAccount()
         val saved = uiPrefs.getString("home_layout_mode", HomeLayoutMode.BENTO.name)
         homeLayoutMode = try { HomeLayoutMode.valueOf(saved ?: HomeLayoutMode.BENTO.name) }
         catch (_: Exception) { HomeLayoutMode.BENTO }
@@ -230,18 +243,20 @@ fun CategoriesHomeScreen(
                                     )
                                 } else {
                                     Icon(
-                                        imageVector = if (signedInAccount != null) Icons.Default.Cloud else Icons.Outlined.Cloud,
+                                        imageVector = if (isConnected) Icons.Default.Cloud else Icons.Outlined.Cloud,
                                         contentDescription = "Sync",
-                                        tint = if (signedInAccount != null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                                        tint = if (isConnected) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                                         modifier = Modifier.size(22.dp)
                                     )
-                                    if (signedInAccount != null && syncManager.lastSyncTimestamp > 0) {
+                                    if (isConnected && isSynced) {
                                         Box(
                                             modifier = Modifier
                                                 .align(Alignment.TopEnd)
-                                                .size(6.dp)
+                                                .offset(x = 2.dp, y = (-2).dp)
+                                                .size(7.dp)
                                                 .clip(CircleShape)
                                                 .background(Color(0xFF00E676))
+                                                .border(1.dp, MaterialTheme.colorScheme.surface, CircleShape)
                                         )
                                     }
                                 }

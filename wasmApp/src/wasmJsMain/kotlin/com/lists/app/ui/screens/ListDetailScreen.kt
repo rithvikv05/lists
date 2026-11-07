@@ -12,8 +12,10 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -81,6 +83,13 @@ enum class ItemStatusFilter(val displayName: String) {
     DONE("Done")
 }
 
+enum class BookStatusFilter(val displayName: String) {
+    ALL("All"),
+    READING("Reading"),
+    TO_READ("To Read"),
+    READ("Read")
+}
+
 enum class ItemSortOption(val label: String) {
     DATE_ADDED_DESC("Date Added (Newest)"),
     TITLE_ASC("Title (A – Z)"),
@@ -98,7 +107,8 @@ fun ListDetailScreen(
     onNavigateToAddItem: (Long, String?) -> Unit,
     searchTrigger: Int = 0,
     searchRequested: Boolean = false,
-    onSearchHandled: (() -> Unit)? = null
+    onSearchHandled: (() -> Unit)? = null,
+    onSearchActiveChange: ((Boolean) -> Unit)? = null
 ) {
     val list by repository.getList(listId).collectAsState(initial = null)
     val rawItems by repository.getItems(listId).collectAsState(initial = emptyList())
@@ -112,6 +122,7 @@ fun ListDetailScreen(
         mutableStateOf(try { ViewDisplayMode.valueOf(saved!!) } catch (_: Exception) { ViewDisplayMode.GRID })
     }
     var statusFilter by remember { mutableStateOf(ItemStatusFilter.ALL) }
+    var bookStatusFilter by remember { mutableStateOf(BookStatusFilter.ALL) }
     var sortOption by remember { mutableStateOf(ItemSortOption.DATE_ADDED_DESC) }
 
     val syncManager = remember { DriveSyncManager(context) }
@@ -156,6 +167,10 @@ fun ListDetailScreen(
             onSearchHandled?.invoke()
         }
     }
+
+    LaunchedEffect(isSearchActive) {
+        onSearchActiveChange?.invoke(isSearchActive)
+    }
     var showSortSheet by remember { mutableStateOf(false) }
     var showOptionsSheet by remember { mutableStateOf(false) }
     var showEditListModal by remember { mutableStateOf(false) }
@@ -182,7 +197,7 @@ fun ListDetailScreen(
         RatingScaleOption.fromId(saved, defaultScale)
     }
 
-    val filteredItems = remember(rawItems, statusFilter, searchQuery) {
+    val filteredItems = remember(rawItems, statusFilter, bookStatusFilter, searchQuery, category) {
         var items = rawItems
         if (searchQuery.isNotBlank()) {
             items = items.filter {
@@ -190,14 +205,23 @@ fun ListDetailScreen(
                         it.creator.contains(searchQuery, ignoreCase = true)
             }
         }
-        when (statusFilter) {
-            ItemStatusFilter.ALL -> items
-            ItemStatusFilter.DONE -> items.filter { it.marked }
-            ItemStatusFilter.REMAINING -> items.filter { !it.marked }
+        if (category == Category.BOOK) {
+            when (bookStatusFilter) {
+                BookStatusFilter.ALL -> items
+                BookStatusFilter.READ -> items.filter { it.marked || (it.totalPages > 0 && it.currentPage >= it.totalPages) }
+                BookStatusFilter.READING -> items.filter { it.currentPage > 0 && !it.marked && (it.totalPages == 0 || it.currentPage < it.totalPages) }
+                BookStatusFilter.TO_READ -> items.filter { it.currentPage == 0 && !it.marked }
+            }
+        } else {
+            when (statusFilter) {
+                ItemStatusFilter.ALL -> items
+                ItemStatusFilter.DONE -> items.filter { it.marked }
+                ItemStatusFilter.REMAINING -> items.filter { !it.marked }
+            }
         }
     }
 
-    val (sortedPinned, sortedRemaining, sortedCompleted) = remember(filteredItems, sortOption) {
+    val (sortedPinned, sortedRemaining, sortedCompleted) = remember(filteredItems, sortOption, category) {
         fun sortGroup(group: List<ListItem>): List<ListItem> {
             return when (sortOption) {
                 ItemSortOption.DATE_ADDED_DESC -> group.sortedByDescending { it.createdAt }
@@ -206,10 +230,24 @@ fun ListDetailScreen(
                 ItemSortOption.YEAR_DESC -> group.sortedByDescending { it.releaseYear }
             }
         }
-        val pinned = sortGroup(filteredItems.filter { it.pinned })
-        val remaining = sortGroup(filteredItems.filter { !it.pinned && !it.marked })
-        val completed = sortGroup(filteredItems.filter { !it.pinned && it.marked })
-        Triple(pinned, remaining, completed)
+        if (category == Category.BOOK) {
+            // Books: Reading on top, then To Read, then Read
+            val reading = sortGroup(filteredItems.filter {
+                (it.pinned || (it.currentPage > 0 && (it.totalPages == 0 || it.currentPage < it.totalPages))) && !it.marked
+            })
+            val toRead = sortGroup(filteredItems.filter {
+                !it.marked && !it.pinned && it.currentPage == 0
+            })
+            val read = sortGroup(filteredItems.filter {
+                it.marked || (it.totalPages > 0 && it.currentPage >= it.totalPages)
+            })
+            Triple(reading, toRead, read)
+        } else {
+            val pinned = sortGroup(filteredItems.filter { it.pinned })
+            val remaining = sortGroup(filteredItems.filter { !it.pinned && !it.marked })
+            val completed = sortGroup(filteredItems.filter { !it.pinned && it.marked })
+            Triple(pinned, remaining, completed)
+        }
     }
 
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
@@ -524,35 +562,68 @@ fun ListDetailScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Left: Quick Filter Pills (All | Done | Remaining)
+                    // Left: Quick Filter Pills (Scrollable with weight, never squishes the view slider)
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(if (category == Category.BOOK) 5.dp else 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        ItemStatusFilter.entries.forEach { filter ->
-                            val isSelected = statusFilter == filter
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
-                                border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
-                                modifier = Modifier
-                                    .height(32.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable {
-                                        statusFilter = filter
-                                        triggerAsmrTick(context)
-                                    }
-                            ) {
-                                Box(
-                                    modifier = Modifier.padding(horizontal = 12.dp),
-                                    contentAlignment = Alignment.Center
+                        if (category == Category.BOOK) {
+                            BookStatusFilter.entries.forEach { filter ->
+                                val isSelected = bookStatusFilter == filter
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                                    border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            bookStatusFilter = filter
+                                            triggerAsmrTick(context)
+                                        }
                                 ) {
-                                    Text(
-                                        text = filter.displayName,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Box(
+                                        modifier = Modifier.padding(horizontal = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = filter.displayName,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            ItemStatusFilter.entries.forEach { filter ->
+                                val isSelected = statusFilter == filter
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                                    border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            statusFilter = filter
+                                            triggerAsmrTick(context)
+                                        }
+                                ) {
+                                    Box(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = filter.displayName,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -670,6 +741,12 @@ fun ListDetailScreen(
                         contentPadding = PaddingValues(bottom = 96.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
+                        // 1. Reading (Books) or Pinned Items
+                        if (category == Category.BOOK && sortedPinned.isNotEmpty()) {
+                            item(key = "divider_reading", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                                SectionAccentDivider(label = "Reading")
+                            }
+                        }
                         if (sortedPinned.isNotEmpty()) {
                             items(sortedPinned, key = { "pinned_${it.id}" }) { item ->
                                 val isSelected = selectedItemIds.contains(item.id)
@@ -705,7 +782,7 @@ fun ListDetailScreen(
 
                         if (sortedPinned.isNotEmpty() && sortedRemaining.isNotEmpty()) {
                             item(key = "divider_pinned", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                                SectionAccentDivider()
+                                SectionAccentDivider(label = if (category == Category.BOOK) "To Read" else null)
                             }
                         }
 

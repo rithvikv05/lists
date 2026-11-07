@@ -117,6 +117,11 @@ fun main() {
 
                     var searchTriggerHome by remember { mutableStateOf(0) }
                     var searchTriggerDetail by remember { mutableStateOf(0) }
+                    var isSearchActive by remember { mutableStateOf(false) }
+
+                    LaunchedEffect(currentScreen) {
+                        isSearchActive = false
+                    }
 
                     val syncing by WebStore.syncing.collectAsState()
                     val syncStatus by DriveSyncManager.syncStatus.collectAsState()
@@ -134,7 +139,7 @@ fun main() {
                         ) {
                             Row(modifier = Modifier.fillMaxSize()) {
                                 if (wideLayout) {
-                                    val showBack = currentScreen is Screen.ItemDetail || currentScreen is Screen.AddItem || currentScreen is Screen.Lists
+                                    val showBack = currentScreen is Screen.ItemDetail || currentScreen is Screen.AddItem
 
                                     NavigationRail(
                                         containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -169,7 +174,7 @@ fun main() {
                                                 } else {
                                                     Surface(
                                                         onClick = {
-                                                            if (currentScreen is Screen.Lists) {
+                                                            if (currentScreen is Screen.Home || currentScreen is Screen.Lists) {
                                                                 searchTriggerHome++
                                                             } else if (currentScreen is Screen.ListDetail) {
                                                                 searchTriggerDetail++
@@ -178,17 +183,18 @@ fun main() {
                                                                 if (backStack.isEmpty()) {
                                                                     backStack.add(Screen.Home)
                                                                 }
+                                                                searchTriggerHome++
                                                             }
                                                         },
                                                         shape = CircleShape,
-                                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                                        color = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
                                                         modifier = Modifier.size(44.dp)
                                                     ) {
                                                         Box(contentAlignment = Alignment.Center) {
                                                             Icon(
                                                                 imageVector = Icons.Default.Search,
                                                                 contentDescription = "Search",
-                                                                tint = MaterialTheme.colorScheme.primary,
+                                                                tint = if (isSearchActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
                                                                 modifier = Modifier.size(22.dp)
                                                             )
                                                         }
@@ -337,7 +343,8 @@ fun main() {
                                                 onNavigateToSettings = {
                                                     backStack.add(Screen.Settings)
                                                 },
-                                                searchTrigger = searchTriggerHome
+                                                searchTrigger = searchTriggerHome,
+                                                onSearchActiveChange = { isSearchActive = it }
                                             )
                                         }
 
@@ -356,7 +363,8 @@ fun main() {
                                                 onNavigateToSettings = {
                                                     backStack.add(Screen.Settings)
                                                 },
-                                                searchTrigger = searchTriggerHome
+                                                searchTrigger = searchTriggerHome,
+                                                onSearchActiveChange = { isSearchActive = it }
                                             )
                                         }
 
@@ -374,7 +382,8 @@ fun main() {
                                                 onNavigateToAddItem = { listId, query ->
                                                     backStack.add(Screen.AddItem(listId, query))
                                                 },
-                                                searchTrigger = searchTriggerDetail
+                                                searchTrigger = searchTriggerDetail,
+                                                onSearchActiveChange = { isSearchActive = it }
                                             )
                                         }
 

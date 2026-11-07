@@ -6,6 +6,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -59,7 +60,8 @@ fun CategoriesHomeScreen(
     onNavigateToCategory: (Category) -> Unit,
     onNavigateToArchive: () -> Unit,
     onNavigateToSettings: (() -> Unit)? = null,
-    searchTrigger: Int = 0
+    searchTrigger: Int = 0,
+    onSearchActiveChange: ((Boolean) -> Unit)? = null
 ) {
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
@@ -96,10 +98,20 @@ fun CategoriesHomeScreen(
     var showSearchBar by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
+    var lastTrigger by remember { mutableStateOf(searchTrigger) }
     LaunchedEffect(searchTrigger) {
-        if (searchTrigger > 0) {
-            showSearchBar = true
+        if (searchTrigger != lastTrigger) {
+            lastTrigger = searchTrigger
+            showSearchBar = !showSearchBar
+            if (!showSearchBar) {
+                focusManager.clearFocus()
+                searchQuery = ""
+            }
         }
+    }
+
+    LaunchedEffect(showSearchBar) {
+        onSearchActiveChange?.invoke(showSearchBar)
     }
 
     // Google Drive Sync
@@ -235,9 +247,11 @@ fun CategoriesHomeScreen(
                                         Box(
                                             modifier = Modifier
                                                 .align(Alignment.TopEnd)
-                                                .size(6.dp)
+                                                .offset(x = 2.dp, y = (-2).dp)
+                                                .size(7.dp)
                                                 .clip(CircleShape)
                                                 .background(Color(0xFF00E676))
+                                                .border(1.dp, MaterialTheme.colorScheme.surface, CircleShape)
                                         )
                                     }
                                 }
