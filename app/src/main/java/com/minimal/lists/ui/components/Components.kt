@@ -1008,7 +1008,7 @@ fun NewListModal(
             // List Name input
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = "Name your list...",
+                    text = "List Name",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1018,7 +1018,7 @@ fun NewListModal(
                     onValueChange = { name = it },
                     placeholder = {
                         Text(
-                            text = "List Name",
+                            text = "Name your list...",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.outline
                         )

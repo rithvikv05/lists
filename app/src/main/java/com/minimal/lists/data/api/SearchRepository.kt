@@ -2088,7 +2088,7 @@ class SearchRepository {
                 "intitle:\"$cleanTitle\""
             }
             val encoded = URLEncoder.encode(q, "UTF-8")
-            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=5&key=AIzaSyA0VwxRvK4yPxj29t2mlkB92wRrdp2Em04"
+            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=5"
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", "ListsApp/1.0")
@@ -2154,7 +2154,7 @@ class SearchRepository {
             }
             val encoded = URLEncoder.encode(formattedQuery, "UTF-8")
             val langParam = if (!langFilter.isNullOrBlank()) "&langRestrict=${URLEncoder.encode(langFilter.lowercase(), "UTF-8")}" else ""
-            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=40$langParam&key=AIzaSyA0VwxRvK4yPxj29t2mlkB92wRrdp2Em04"
+            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=40$langParam"
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")

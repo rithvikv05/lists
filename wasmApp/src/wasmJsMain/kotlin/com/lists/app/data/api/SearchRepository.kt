@@ -738,7 +738,7 @@ class SearchRepository {
             val cleanAuthor = creator.split(",", "/").firstOrNull()?.trim() ?: ""
             val q = if (cleanAuthor.isNotBlank()) "intitle:\"$cleanTitle\" inauthor:\"$cleanAuthor\"" else "intitle:\"$cleanTitle\""
             val encoded = encodeURIComponent(q)
-            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=5&key=AIzaSyA0VwxRvK4yPxj29t2mlkB92wRrdp2Em04"
+            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=5"
             val response = client.get(url).bodyAsText()
             val root = json.parseToJsonElement(response).jsonObject
             val items = root["items"]?.jsonArray
@@ -787,7 +787,7 @@ class SearchRepository {
                     BookSearchType.AUTHOR -> "inauthor:"
                     BookSearchType.ALL -> ""
                 }
-                val url = "https://www.googleapis.com/books/v1/volumes?q=${prefix}$term&maxResults=20&key=AIzaSyA0VwxRvK4yPxj29t2mlkB92wRrdp2Em04"
+                val url = "https://www.googleapis.com/books/v1/volumes?q=${prefix}$term&maxResults=20"
                 val response = client.get(url).bodyAsText()
                 val root = json.parseToJsonElement(response).jsonObject
                 val items = root["items"]?.jsonArray
