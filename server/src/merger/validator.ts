@@ -21,7 +21,8 @@ export function isValidSearchResult(item: SearchResult): boolean {
     item.coverUrl ||
     item.overview ||
     item.creator ||
-    item.releaseYear
+    item.releaseYear ||
+    item.sourceRefs?.some(ref => ref.id)
   );
 }
 

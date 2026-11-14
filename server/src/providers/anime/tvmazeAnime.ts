@@ -1,9 +1,10 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchTvmazeAnime(query: string, year?: string): Promise<SearchResult[]> {
   try {
     const url = `https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'ListsEngine/2.0 (media-aggregator)' },
     });
@@ -35,7 +36,7 @@ export async function searchTvmazeAnime(query: string, year?: string): Promise<S
       })
       .map(item => {
         const s = item.show;
-        const releaseYear = s.premiered ? s.premiered.slice(0, 4) : (year || '');
+        const releaseYear = s.premiered ? s.premiered.slice(0, 4) : '';
         const cleanSummary = (s.summary || '').replace(/<[^>]*>/g, '').trim();
 
         return {

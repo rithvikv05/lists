@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchAppleBooks(
@@ -11,7 +12,7 @@ export async function searchAppleBooks(
     const country = lang && ['hi', 'ta', 'te', 'ml', 'kn', 'bn'].includes(lang.toLowerCase()) ? 'in' : 'us';
     const url = `https://itunes.apple.com/search?term=${term}&entity=ebook&limit=25&country=${country}`;
 
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       headers: { 'User-Agent': 'ListsSearchEngine/1.0' },
       signal: AbortSignal.timeout(2200)
     });
@@ -31,6 +32,9 @@ export async function searchAppleBooks(
 
         results.push({
           title,
+          sourceRefs: [{ source: 'apple', id: String(item.trackId), url: item.trackViewUrl || '' }],
+          creators: item.artistName ? [{ name: item.artistName, role: 'author' }] : [],
+          genres: item.genres || [],
           creator: item.artistName || '',
           releaseYear,
           releaseDate: releaseDate.slice(0, 10),

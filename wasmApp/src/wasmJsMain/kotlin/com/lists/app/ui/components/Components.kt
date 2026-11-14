@@ -217,6 +217,13 @@ fun CoverImage(
         }
     }
     val hasValidImage = cleanUrl.isNotBlank()
+    var useCoverRelay by remember(cleanUrl) { mutableStateOf(false) }
+    var imageFailed by remember(cleanUrl) { mutableStateOf(false) }
+    val displayUrl = if (useCoverRelay) {
+        val engine = com.lists.app.data.api.SearchRepository.remoteEngineUrl.trimEnd('/')
+            .removeSuffix("/v2").removeSuffix("/v1")
+        "$engine/v2/cover?url=${com.lists.app.encodeURIComponent(cleanUrl)}"
+    } else cleanUrl
 
     Box(
         modifier = modifier
@@ -226,14 +233,20 @@ fun CoverImage(
         if (hasValidImage) {
             AsyncImage(
                 model = ImageRequest.Builder(context)
-                    .data(cleanUrl)
+                    .data(displayUrl)
                     .crossfade(true)
                     .build(),
                 contentDescription = null,
+                onError = {
+                    if (!useCoverRelay && cleanUrl.startsWith("https://")) useCoverRelay = true
+                    else imageFailed = true
+                },
+                onSuccess = { imageFailed = false },
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
-        } else {
+        }
+        if (!hasValidImage || imageFailed) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center

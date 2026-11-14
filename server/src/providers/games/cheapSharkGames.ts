@@ -1,9 +1,10 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchCheapSharkGames(query: string, year?: string): Promise<SearchResult[]> {
   try {
     const url = `https://www.cheapshark.com/api/1.0/games?title=${encodeURIComponent(query)}&limit=6`;
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'ListsEngine/2.0 (media-aggregator)' },
     });

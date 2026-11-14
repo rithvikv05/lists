@@ -65,6 +65,7 @@ import com.lists.app.triggerAsmrTick
 import com.lists.app.triggerStrongTick
 import com.lists.app.data.db.ListItem
 import com.lists.app.data.model.Category
+import com.lists.app.data.model.RatingConverter
 import com.lists.app.data.model.RatingScaleOption
 import com.lists.app.data.repository.AppRepository
 import com.lists.app.data.sync.DriveSyncManager
@@ -92,8 +93,8 @@ enum class BookStatusFilter(val displayName: String) {
 
 enum class ItemSortOption(val label: String) {
     DATE_ADDED_DESC("Date Added (Newest)"),
-    TITLE_ASC("Title (A – Z)"),
-    RATING_DESC("Highest Rated"),
+    TITLE_ASC("Title"),
+    RATING_DESC("Rating"),
     YEAR_DESC("Release Year")
 }
 
@@ -124,6 +125,8 @@ fun ListDetailScreen(
     var statusFilter by remember { mutableStateOf(ItemStatusFilter.ALL) }
     var bookStatusFilter by remember { mutableStateOf(BookStatusFilter.ALL) }
     var sortOption by remember { mutableStateOf(ItemSortOption.DATE_ADDED_DESC) }
+    var sortDescending by remember { mutableStateOf(true) }
+
 
     val syncManager = remember { DriveSyncManager(context) }
     val signInHelper = remember { GoogleSignInHelper(context) }
@@ -221,32 +224,25 @@ fun ListDetailScreen(
         }
     }
 
-    val (sortedPinned, sortedRemaining, sortedCompleted) = remember(filteredItems, sortOption, category) {
+    val (sortedPinned, sortedRemaining, sortedCompleted) = remember(filteredItems, sortOption, sortDescending, category) {
         fun sortGroup(group: List<ListItem>): List<ListItem> {
-            return when (sortOption) {
+
+            val sorted = when (sortOption) {
                 ItemSortOption.DATE_ADDED_DESC -> group.sortedByDescending { it.createdAt }
                 ItemSortOption.TITLE_ASC -> group.sortedBy { it.title.lowercase() }
-                ItemSortOption.RATING_DESC -> group.sortedByDescending { it.rating }
+                ItemSortOption.RATING_DESC -> group.sortedByDescending { RatingConverter.getUserRatingScore(it) }
                 ItemSortOption.YEAR_DESC -> group.sortedByDescending { it.releaseYear }
+
             }
+            return if (sortDescending == (sortOption != ItemSortOption.TITLE_ASC)) sorted else sorted.reversed()
         }
         if (category == Category.BOOK) {
-            // Books: Reading on top, then To Read, then Read
-            val reading = sortGroup(filteredItems.filter {
-                (it.pinned || (it.currentPage > 0 && (it.totalPages == 0 || it.currentPage < it.totalPages))) && !it.marked
-            })
-            val toRead = sortGroup(filteredItems.filter {
-                !it.marked && !it.pinned && it.currentPage == 0
-            })
-            val read = sortGroup(filteredItems.filter {
-                it.marked || (it.totalPages > 0 && it.currentPage >= it.totalPages)
-            })
+            val reading = sortGroup(filteredItems.filter { (it.pinned || (it.currentPage > 0 && (it.totalPages == 0 || it.currentPage < it.totalPages))) && !it.marked })
+            val toRead = sortGroup(filteredItems.filter { !it.marked && !it.pinned && it.currentPage == 0 })
+            val read = sortGroup(filteredItems.filter { it.marked || (it.totalPages > 0 && it.currentPage >= it.totalPages) })
             Triple(reading, toRead, read)
         } else {
-            val pinned = sortGroup(filteredItems.filter { it.pinned })
-            val remaining = sortGroup(filteredItems.filter { !it.pinned && !it.marked })
-            val completed = sortGroup(filteredItems.filter { !it.pinned && it.marked })
-            Triple(pinned, remaining, completed)
+            Triple(sortGroup(filteredItems.filter { it.pinned }), sortGroup(filteredItems.filter { !it.pinned && !it.marked }), sortGroup(filteredItems.filter { !it.pinned && it.marked }))
         }
     }
 
@@ -751,6 +747,7 @@ fun ListDetailScreen(
                             items(sortedPinned, key = { "pinned_${it.id}" }) { item ->
                                 val isSelected = selectedItemIds.contains(item.id)
                                 val inSelectionMode = selectedItemIds.isNotEmpty()
+
                                 GridMediaCard(
                                     item = item,
                                     category = category,
@@ -790,6 +787,7 @@ fun ListDetailScreen(
                             items(sortedRemaining, key = { "remaining_${it.id}" }) { item ->
                                 val isSelected = selectedItemIds.contains(item.id)
                                 val inSelectionMode = selectedItemIds.isNotEmpty()
+
                                 GridMediaCard(
                                     item = item,
                                     category = category,
@@ -829,6 +827,7 @@ fun ListDetailScreen(
                             items(sortedCompleted, key = { "completed_${it.id}" }) { item ->
                                 val isSelected = selectedItemIds.contains(item.id)
                                 val inSelectionMode = selectedItemIds.isNotEmpty()
+
                                 GridMediaCard(
                                     item = item,
                                     category = category,
@@ -869,6 +868,7 @@ fun ListDetailScreen(
                             items(sortedPinned, key = { "pinned_${it.id}" }) { item ->
                                 val isSelected = selectedItemIds.contains(item.id)
                                 val inSelectionMode = selectedItemIds.isNotEmpty()
+
                                 ListMediaRow(
                                     item = item,
                                     category = category,
@@ -908,6 +908,7 @@ fun ListDetailScreen(
                             items(sortedRemaining, key = { "remaining_${it.id}" }) { item ->
                                 val isSelected = selectedItemIds.contains(item.id)
                                 val inSelectionMode = selectedItemIds.isNotEmpty()
+
                                 ListMediaRow(
                                     item = item,
                                     category = category,
@@ -947,6 +948,7 @@ fun ListDetailScreen(
                             items(sortedCompleted, key = { "completed_${it.id}" }) { item ->
                                 val isSelected = selectedItemIds.contains(item.id)
                                 val inSelectionMode = selectedItemIds.isNotEmpty()
+
                                 ListMediaRow(
                                     item = item,
                                     category = category,
@@ -1019,6 +1021,7 @@ fun ListDetailScreen(
                     }
                 }
             }
+
         }
 
     if (showSortSheet) {
@@ -1045,7 +1048,9 @@ fun ListDetailScreen(
                     val isSelected = option == sortOption
                     Surface(
                         onClick = {
-                            sortOption = option
+
+                            if (sortOption == option) sortDescending = !sortDescending
+                            else { sortOption = option; sortDescending = option != ItemSortOption.TITLE_ASC }
                             showSortSheet = false
                             triggerAsmrTick(context)
                         },
@@ -1059,7 +1064,7 @@ fun ListDetailScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = option.label,
+                                text = option.label + if (if (isSelected) sortDescending else option != ItemSortOption.TITLE_ASC) "  ↓" else "  ↑",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface

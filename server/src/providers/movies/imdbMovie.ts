@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchImdbMovies(query: string, year?: string): Promise<SearchResult[]> {
@@ -7,7 +8,7 @@ export async function searchImdbMovies(query: string, year?: string): Promise<Se
     if (!qSanitized) return [];
 
     const url = `https://v3.sg.media-imdb.com/suggestion/x/${qSanitized}.json`;
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
       signal: AbortSignal.timeout(2200)
     });

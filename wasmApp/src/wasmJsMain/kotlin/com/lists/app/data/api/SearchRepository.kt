@@ -57,7 +57,7 @@ object QueryNormalizer {
         val variants: List<String>
     )
 
-    private val YEAR_REGEX = Regex("""\b(19\d{2}|20\d{2})\b""")
+    private val YEAR_REGEX = Regex("""\s+\(((?:18|19|20)\d{2})\)\s*$""")
 
     private val ROMAN_TO_ARABIC = listOf(
         Regex("""\bVIII\b""", RegexOption.IGNORE_CASE) to "8",
@@ -126,9 +126,9 @@ object QueryNormalizer {
         val trimmed = input.trim()
         val folded = foldDiacritics(trimmed)
         val yearMatch = YEAR_REGEX.find(folded)
-        val extractedYear = yearMatch?.value
+        val extractedYear = yearMatch?.groupValues?.get(1)
         val cleanQuery = if (extractedYear != null) {
-            folded.replace(extractedYear, "").replace(Regex("""\s+"""), " ").trim()
+            folded.replace(YEAR_REGEX, "").replace(Regex("""\s+"""), " ").trim()
         } else {
             folded
         }
@@ -252,7 +252,7 @@ object FuzzyMatcher {
 
 class SearchRepository {
     companion object {
-        var remoteEngineUrl: String = "https://lists-search-engine.minimal-lists.workers.dev/v1"
+        var remoteEngineUrl: String = "https://lists-search-engine.minimal-lists.workers.dev/v2"
         private val searchCache = mutableMapOf<String, List<SearchResult>>()
         private val inFlightRequests = mutableMapOf<String, Deferred<List<SearchResult>>>()
         private val negativeCache = mutableMapOf<String, Long>()
@@ -267,17 +267,23 @@ class SearchRepository {
         category: Category,
         subFilter: String = "ALL",
         year: String? = null,
-        lang: String? = null
+        lang: String? = null,
+        mode: String = "ALL",
+        backup: Boolean = false
     ): List<SearchResult>? {
         if (remoteEngineUrl.isBlank()) return null
         return try {
             val qEncoded = encodeURIComponent(query)
             val yearParam = if (!year.isNullOrBlank()) "&year=${encodeURIComponent(year)}" else ""
             val langParam = if (!lang.isNullOrBlank()) "&lang=${encodeURIComponent(lang)}" else ""
-            val url = "$remoteEngineUrl/search?q=$qEncoded&category=${category.name}&subFilter=$subFilter$yearParam$langParam"
+            val strategy = if (backup) "&strategy=backup" else ""
+            val url = "$remoteEngineUrl/search?q=$qEncoded&category=${category.name}&subFilter=$subFilter&mode=$mode$yearParam$langParam$strategy"
 
-            val response = client.get(url).bodyAsText()
+            val httpResponse = client.get(url)
+            if (httpResponse.status.value !in 200..299) return null
+            val response = httpResponse.bodyAsText()
             val root = json.parseToJsonElement(response).jsonObject
+            if ((root["schemaVersion"]?.jsonPrimitive?.intOrNull ?: 0) < 2) return null
             val arr = root["results"]?.jsonArray ?: return null
             val list = mutableListOf<SearchResult>()
             for (elem in arr) {
@@ -298,11 +304,27 @@ class SearchRepository {
                         totalEpisodes = obj["totalEpisodes"]?.jsonPrimitive?.intOrNull ?: 0,
                         totalPages = obj["totalPages"]?.jsonPrimitive?.intOrNull ?: 0,
                         category = parsedCat,
-                        externalUrl = obj["externalUrl"]?.jsonPrimitive?.content ?: ""
+                        externalUrl = obj["externalUrl"]?.jsonPrimitive?.content ?: "",
+                        originalTitle = obj["originalTitle"]?.jsonPrimitive?.contentOrNull ?: "",
+                        backdropUrl = obj["backdropUrl"]?.jsonPrimitive?.contentOrNull ?: "",
+                        isbn = obj["isbn"]?.jsonPrimitive?.contentOrNull ?: "",
+                        publisher = obj["publisher"]?.jsonPrimitive?.contentOrNull ?: "",
+                        language = obj["language"]?.jsonPrimitive?.contentOrNull ?: "",
+                        entityKind = obj["entityKind"]?.jsonPrimitive?.contentOrNull ?: "",
+                        engineId = obj["id"]?.jsonPrimitive?.contentOrNull ?: "",
+                        totalChapters = obj["totalChapters"]?.jsonPrimitive?.intOrNull ?: 0,
+                        totalVolumes = obj["totalVolumes"]?.jsonPrimitive?.intOrNull ?: 0,
+                        totalIssues = obj["totalIssues"]?.jsonPrimitive?.intOrNull ?: 0,
+                        runtimeMinutes = obj["runtimeMinutes"]?.jsonPrimitive?.intOrNull ?: 0,
+                        genres = obj["genres"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList(),
+                        platforms = obj["platforms"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList(),
+                        metadataJson = compactMetadataSnapshot(obj.toString())
                     )
                 )
             }
-            if (list.isNotEmpty()) list else null
+            list.filter { query.startsWith("https://", ignoreCase = true) || it.category != Category.GAME || isValidSearchResult(it) }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (_: Throwable) {
             null
         }
@@ -318,10 +340,11 @@ class SearchRepository {
             return false
         }
         if (item.category == Category.GAME) {
+            if (item.entityKind.isNotBlank() && item.entityKind != "game") return false
+            if (Regex("""(?i)\b(demo|playtest|soundtrack|supporter\s+(pack|edition)|season\s+pass|expansion\s+pack|bundle|collection|compilation)\s*(\([^)]*\))?$""").containsMatchIn(title)) return false
             // Filter out store price duplicates that have no real game overview
             val c = item.creator.trim()
-            if (c.startsWith("$") || c.startsWith("€") || c.startsWith("£") || c.startsWith("¥") || c.startsWith("₹") ||
-                c.matches(Regex("""^[\$€£¥₹\d].*"""))) {
+            if (c.startsWith("$") || c.startsWith("€") || c.startsWith("£") || c.startsWith("¥") || c.startsWith("₹")) {
                 return false
             }
             if (item.overview.isBlank() && (item.externalUrl.contains("steampowered.com") || item.coverUrl.contains("steamstatic.com"))) {
@@ -423,6 +446,10 @@ class SearchRepository {
         val q = query.trim()
         if (q.isBlank()) return emptyList()
 
+        if (q.startsWith("https://", ignoreCase = true)) {
+            val remote = withTimeoutOrNull(4000) { fetchFromRemoteEngine(q, category) }
+            if (remote != null) return remote
+        }
         val norm = QueryNormalizer.normalize(q)
         val effectiveYear = selectedYear ?: norm.extractedYear
         val searchCleanQuery = norm.cleanQuery
@@ -450,22 +477,26 @@ class SearchRepository {
 
         return coroutineScope {
             val deferred = async {
-                // Try standalone edge search engine first (2200ms timeout)
+                // Allow the engine's backup phase to finish before cancelling it.
                 val subFilter = when (category) {
                     Category.BOOK -> bookSubFilter.name
                     Category.TV_SHOW -> tvSubFilter.name
                     else -> "ALL"
                 }
-                val remoteResults = withTimeoutOrNull(2200) {
-                    fetchFromRemoteEngine(searchCleanQuery, category, subFilter, effectiveYear, selectedLanguage)
+                val primaryResults = withTimeoutOrNull(7500) {
+                    fetchFromRemoteEngine(q, category, subFilter, selectedYear, selectedLanguage, bookSearchType.name)
                 }
-                if (!remoteResults.isNullOrEmpty()) {
-                    val validRemote = remoteResults.filter { isValidSearchResult(it) }
-                    val deduplicatedRemote = deduplicate(validRemote)
-                    if (deduplicatedRemote.isNotEmpty()) {
-                        searchCache[cacheKey] = deduplicatedRemote
-                        return@async deduplicatedRemote
-                    }
+                val remoteResults = primaryResults ?: withTimeoutOrNull(5000) {
+                    fetchFromRemoteEngine(q, category, subFilter, selectedYear, selectedLanguage, bookSearchType.name, backup = true)
+                }
+                if (remoteResults != null) {
+                    // The engine has already resolved identities and united metadata.
+                    // Do not re-merge by title or cache partial responses on the client.
+                    return@async remoteResults
+                }
+
+                if (remoteEngineUrl.isNotBlank()) {
+                    throw IllegalStateException("Search sources and backups could not be reached. Please try again.")
                 }
 
                 // Seamless fallback to embedded local providers if remote is unavailable
@@ -495,7 +526,7 @@ class SearchRepository {
                     searchCache[cacheKey] = ranked
                     negativeCache.remove(cacheKey)
                 } else {
-                    negativeCache[cacheKey] = currentTimeMillis()
+                    negativeCache.remove(cacheKey)
                 }
 
                 ranked
@@ -686,7 +717,7 @@ class SearchRepository {
                 BookSearchType.AUTHOR -> "&type=author"
                 BookSearchType.ALL -> ""
             }
-            val url = "https://books-cloud-engine.minimal-lists.workers.dev/api/v1/books/search?q=$term$typeParam"
+            val url = "${remoteEngineUrl.removeSuffix("/v2").removeSuffix("/v1")}/api/v1/books/search?q=$term$typeParam"
             val response = client.get(url).bodyAsText()
             val root = json.parseToJsonElement(response).jsonObject
             val arr = root["results"]?.jsonArray ?: return results
@@ -716,6 +747,8 @@ class SearchRepository {
                 results.add(
                     SearchResult(
                         title = title,
+                        engineId = obj["canonicalId"]?.jsonPrimitive?.contentOrNull ?: obj["id"]?.jsonPrimitive?.contentOrNull ?: "",
+                        metadataJson = compactMetadataSnapshot(obj.toString()),
                         originalTitle = obj["subtitle"]?.jsonPrimitive?.contentOrNull ?: "",
                         creator = primaryAuthor,
                         coverUrl = coverUrl,
@@ -740,7 +773,7 @@ class SearchRepository {
         val cleanIsbn = isbn.replace("-", "").trim()
         if (cleanIsbn.isNotBlank()) {
             try {
-                val url = "https://books-cloud-engine.minimal-lists.workers.dev/api/v1/books/isbn/$cleanIsbn"
+                val url = "${remoteEngineUrl.removeSuffix("/v2").removeSuffix("/v1")}/api/v1/books/isbn/$cleanIsbn"
                 val response = client.get(url).bodyAsText()
                 val root = json.parseToJsonElement(response).jsonObject
                 if (root["success"]?.jsonPrimitive?.booleanOrNull == true) {

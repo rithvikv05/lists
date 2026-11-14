@@ -1,9 +1,10 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchWikidataGames(query: string, year?: string): Promise<SearchResult[]> {
   try {
     const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&type=item&limit=6&origin=*`;
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'ListsEngine/2.0 (media-aggregator)' },
     });
@@ -27,7 +28,7 @@ export async function searchWikidataGames(query: string, year?: string): Promise
       })
       .map(item => {
         const yearMatch = item.description?.match(/\b(19\d{2}|20\d{2})\b/);
-        const releaseYear = yearMatch ? yearMatch[0] : (year || '');
+        const releaseYear = yearMatch ? yearMatch[0] : '';
 
         return {
           title: item.label,

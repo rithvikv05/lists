@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchITunesMovies(
@@ -11,7 +12,7 @@ export async function searchITunesMovies(
     const country = lang && ['hi', 'ta', 'te', 'ml', 'kn', 'bn'].includes(lang.toLowerCase()) ? 'in' : 'us';
     const url = `https://itunes.apple.com/search?term=${term}&media=movie&limit=25&country=${country}`;
 
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       headers: { 'User-Agent': 'ListsSearchEngine/1.0' },
       signal: AbortSignal.timeout(2200)
     });
@@ -32,6 +33,10 @@ export async function searchITunesMovies(
 
         results.push({
           title,
+          sourceRefs: [{ source: 'apple', id: String(item.trackId), url: item.trackViewUrl || '' }],
+          runtimeMinutes: item.trackTimeMillis ? Math.round(item.trackTimeMillis / 60000) : 0,
+          genres: item.primaryGenreName ? [item.primaryGenreName] : [],
+          creators: item.artistName ? [{ name: item.artistName, role: 'director' }] : [],
           creator: item.artistName || '',
           releaseYear,
           releaseDate: releaseDate.slice(0, 10),

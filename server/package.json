@@ -7,10 +7,15 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --minify",
     "build": "tsc",
-    "start": "tsx src/index.ts"
+    "start": "wrangler dev",
+    "test": "node --import tsx --test test/*.test.ts",
+    "eval:search": "node eval/search.mjs",
+    "dev:catalog": "wrangler dev --config wrangler.catalog.local.toml",
+    "catalog:migrate:local": "wrangler d1 migrations apply lists-catalog-local --local --config wrangler.catalog.local.toml"
   },
   "dependencies": {
-    "hono": "^4.7.2"
+    "hono": "^4.7.2",
+    "htmlparser2": "^12.0.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261104.1",

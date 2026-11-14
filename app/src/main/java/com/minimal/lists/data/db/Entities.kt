@@ -74,6 +74,8 @@ data class ListItem(
     val isbn: String = "", // ISBN-10 or ISBN-13
     val bookLanguage: String = "", // Language code (e.g. en, fr, de, ja)
     val publisher: String = "", // Book publisher
+    val metadataId: String = "",
+    val metadataJson: String = "",
     val readingSessionsJson: String = "", // Serialized JSON array of ReadingSession
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()

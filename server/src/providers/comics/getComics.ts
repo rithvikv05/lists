@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchGetComics(query: string): Promise<SearchResult[]> {
@@ -6,7 +7,7 @@ export async function searchGetComics(query: string): Promise<SearchResult[]> {
     const term = encodeURIComponent(query.trim());
     const url = `https://getcomics.org/wp-json/wp/v2/posts?search=${term}&_embed=1&per_page=15`;
 
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       headers: { 'User-Agent': 'ListsSearchEngine/1.0 (Mozilla/5.0)' },
       signal: AbortSignal.timeout(2200)
     });

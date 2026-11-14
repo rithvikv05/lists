@@ -19,8 +19,8 @@ export function levenshteinDistance(s1: string, s2: string): number {
 }
 
 export function tokenJaccardSimilarity(s1: string, s2: string): number {
-  const t1 = new Set(s1.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
-  const t2 = new Set(s2.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  const t1 = new Set(s1.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+  const t2 = new Set(s2.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
   if (!t1.size || !t2.size) return 0;
 
   let intersection = 0;

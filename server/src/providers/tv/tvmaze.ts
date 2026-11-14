@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchTvMaze(query: string, year?: string): Promise<SearchResult[]> {
@@ -6,7 +7,7 @@ export async function searchTvMaze(query: string, year?: string): Promise<Search
     const term = encodeURIComponent(query);
     const url = `https://api.tvmaze.com/search/shows?q=${term}`;
 
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       headers: { 'User-Agent': 'ListsSearchEngine/1.0' },
       signal: AbortSignal.timeout(2200)
     });
@@ -28,7 +29,17 @@ export async function searchTvMaze(query: string, year?: string): Promise<Search
 
         results.push({
           title: show.name,
-          creator: network,
+          sourceRefs: [
+            { source: 'tvmaze', id: String(show.id), url: show.url || '' },
+            ...(show.externals?.imdb ? [{ source: 'imdb', id: show.externals.imdb, url: `https://www.imdb.com/title/${show.externals.imdb}/` }] : []),
+            ...(Number.isInteger(show.externals?.thetvdb) && show.externals.thetvdb > 0 ? [{ source: 'tvdb', id: String(show.externals.thetvdb), url: `https://thetvdb.com/?tab=series&id=${show.externals.thetvdb}` }] : []),
+          ],
+          genres: show.genres || [],
+          language: show.language || '',
+          status: show.status || '',
+          runtimeMinutes: show.averageRuntime || show.runtime || 0,
+          creator: '',
+          creators: network ? [{ name: network, role: 'network' }] : [],
           releaseYear,
           releaseDate: premiered,
           coverUrl: cover,

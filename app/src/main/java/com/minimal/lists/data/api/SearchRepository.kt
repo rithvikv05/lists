@@ -1,5 +1,7 @@
 package com.minimal.lists.data.api
 
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -64,7 +66,7 @@ object QueryNormalizer {
         val variants: List<String>
     )
 
-    private val YEAR_REGEX = Regex("""\b(19\d{2}|20\d{2})\b""")
+    private val YEAR_REGEX = Regex("""\s+\(((?:18|19|20)\d{2})\)\s*$""")
 
     private val ROMAN_TO_ARABIC = listOf(
         Regex("""\bVIII\b""", RegexOption.IGNORE_CASE) to "8",
@@ -133,9 +135,9 @@ object QueryNormalizer {
         val trimmed = input.trim()
         val folded = foldDiacritics(trimmed)
         val yearMatch = YEAR_REGEX.find(folded)
-        val extractedYear = yearMatch?.value
+        val extractedYear = yearMatch?.groupValues?.get(1)
         val cleanQuery = if (extractedYear != null) {
-            folded.replace(extractedYear, "").replace(Regex("""\s+"""), " ").trim()
+            folded.replace(YEAR_REGEX, "").replace(Regex("""\s+"""), " ").trim()
         } else {
             folded
         }
@@ -266,7 +268,7 @@ object FuzzyMatcher {
 
 class SearchRepository {
     companion object {
-        var remoteEngineUrl: String = "https://lists-search-engine.minimal-lists.workers.dev/v1"
+        var remoteEngineUrl: String = "https://lists-search-engine.minimal-lists.workers.dev/v2"
         private val searchCache = object : android.util.LruCache<String, List<SearchResult>>(200) {}
         private val inFlightRequests = ConcurrentHashMap<String, Deferred<List<SearchResult>>>()
         private val negativeCache = ConcurrentHashMap<String, Long>()
@@ -280,7 +282,7 @@ class SearchRepository {
             maxRequestsPerHost = 16
         })
         .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(7, TimeUnit.SECONDS)
         .build()
 
     suspend fun fetchOttPlatforms(title: String, category: Category): List<OttPlatform> = withContext(Dispatchers.IO) {
@@ -510,29 +512,46 @@ class SearchRepository {
         return itemYear.contains(cleanFilter)
     }
 
+    private suspend fun executeRemoteRequest(request: Request): String? = suspendCancellableCoroutine { continuation ->
+        val call = client.newCall(request)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, error: java.io.IOException) {
+                if (continuation.isActive) continuation.resume(null)
+            }
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                val body = try { response.use { if (it.isSuccessful) it.body?.string() else null } } catch (_: Exception) { null }
+                if (continuation.isActive) continuation.resume(body)
+            }
+        })
+    }
+
     private suspend fun fetchFromRemoteEngine(
         query: String,
         category: Category,
         subFilter: String = "ALL",
         year: String? = null,
-        lang: String? = null
+        lang: String? = null,
+        mode: String = "ALL",
+        backup: Boolean = false
     ): List<SearchResult>? = withContext(Dispatchers.IO) {
         if (remoteEngineUrl.isBlank()) return@withContext null
         try {
             val qEncoded = URLEncoder.encode(query, "UTF-8")
             val yearParam = if (!year.isNullOrBlank()) "&year=${URLEncoder.encode(year, "UTF-8")}" else ""
             val langParam = if (!lang.isNullOrBlank()) "&lang=${URLEncoder.encode(lang, "UTF-8")}" else ""
-            val url = "$remoteEngineUrl/search?q=$qEncoded&category=${category.name}&subFilter=$subFilter$yearParam$langParam"
+            val strategy = if (backup) "&strategy=backup" else ""
+            val url = "$remoteEngineUrl/search?q=$qEncoded&category=${category.name}&subFilter=$subFilter&mode=$mode$yearParam$langParam$strategy"
 
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", "ListsApp/1.0 (Android)")
                 .build()
 
-            client.newCall(req).execute().use { response ->
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: ""
+            val body = executeRemoteRequest(req)
+            if (body != null) {
                     val root = JSONObject(body)
+                    if (root.optInt("schemaVersion", 0) < 2) return@withContext null
                     val arr = root.optJSONArray("results") ?: JSONArray()
                     val list = mutableListOf<SearchResult>()
                     for (i in 0 until arr.length()) {
@@ -554,13 +573,28 @@ class SearchRepository {
                                 totalEpisodes = item.optInt("totalEpisodes", 0),
                                 totalPages = item.optInt("totalPages", 0),
                                 category = parsedCat,
-                                externalUrl = item.optString("externalUrl")
+                                externalUrl = item.optString("externalUrl"),
+                                originalTitle = item.optString("originalTitle"),
+                                backdropUrl = item.optString("backdropUrl"),
+                                isbn = item.optString("isbn"),
+                                publisher = item.optString("publisher"),
+                                language = item.optString("language"),
+                                engineId = item.optString("id"),
+                                entityKind = item.optString("entityKind"),
+                                totalChapters = item.optInt("totalChapters"),
+                                totalVolumes = item.optInt("totalVolumes"),
+                                totalIssues = item.optInt("totalIssues"),
+                                runtimeMinutes = item.optInt("runtimeMinutes"),
+                                genres = item.optJSONArray("genres")?.let { values -> (0 until values.length()).map { values.optString(it) } } ?: emptyList(),
+                                platforms = item.optJSONArray("platforms")?.let { values -> (0 until values.length()).map { values.optString(it) } } ?: emptyList(),
+                                metadataJson = compactMetadataSnapshot(item.toString())
                             )
                         )
                     }
-                    if (list.isNotEmpty()) return@withContext list
-                }
+                    return@withContext list.filter { query.startsWith("https://", ignoreCase = true) || it.category != Category.GAME || isValidSearchResult(it) }
             }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (_: Exception) {}
         null
     }
@@ -575,10 +609,11 @@ class SearchRepository {
             return false
         }
         if (item.category == Category.GAME) {
+            if (item.entityKind.isNotBlank() && item.entityKind != "game") return false
+            if (Regex("""(?i)\b(demo|playtest|soundtrack|supporter\s+(pack|edition)|season\s+pass|expansion\s+pack|bundle|collection|compilation)\s*(\([^)]*\))?$""").containsMatchIn(title)) return false
             // Filter out store price duplicates that have no real game overview
             val c = item.creator.trim()
-            if (c.startsWith("$") || c.startsWith("€") || c.startsWith("£") || c.startsWith("¥") || c.startsWith("₹") ||
-                c.matches(Regex("""^[\$€£¥₹\d].*"""))) {
+            if (c.startsWith("$") || c.startsWith("€") || c.startsWith("£") || c.startsWith("¥") || c.startsWith("₹")) {
                 return false
             }
             if (item.overview.isBlank() && (item.externalUrl.contains("steampowered.com") || item.coverUrl.contains("steamstatic.com"))) {
@@ -625,6 +660,8 @@ class SearchRepository {
         if (trimmed.isEmpty()) return@withContext emptyList()
 
         if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
+            val remote = withTimeoutOrNull(4000) { fetchFromRemoteEngine(trimmed, category) }
+            if (remote != null) return@withContext remote
             val scraped = scrapeUrl(trimmed, category)
             if (scraped != null) {
                 return@withContext listOf(scraped)
@@ -659,22 +696,26 @@ class SearchRepository {
         // 4. Execute search across parallel providers
         coroutineScope {
             val deferred = async(Dispatchers.IO) {
-                // Try standalone edge search engine first (2200ms timeout)
+                // Allow the engine's backup phase to finish before cancelling it.
                 val subFilter = when (category) {
                     Category.BOOK -> bookSubFilter.name
                     Category.TV_SHOW -> tvSubFilter.name
                     else -> "ALL"
                 }
-                val remoteResults = withTimeoutOrNull(2200) {
-                    fetchFromRemoteEngine(searchCleanQuery, category, subFilter, effectiveYear, langFilter)
+                val primaryResults = withTimeoutOrNull(7500) {
+                    fetchFromRemoteEngine(trimmed, category, subFilter, yearFilter, langFilter, bookSearchType.name)
                 }
-                if (!remoteResults.isNullOrEmpty()) {
-                    val validRemote = remoteResults.filter { isValidSearchResult(it) }
-                    val deduplicatedRemote = deduplicateSearchResults(validRemote)
-                    if (deduplicatedRemote.isNotEmpty()) {
-                        searchCache.put(cacheKey, deduplicatedRemote)
-                        return@async deduplicatedRemote
-                    }
+                val remoteResults = primaryResults ?: withTimeoutOrNull(5000) {
+                    fetchFromRemoteEngine(trimmed, category, subFilter, yearFilter, langFilter, bookSearchType.name, backup = true)
+                }
+                if (remoteResults != null) {
+                    // The engine has already resolved identities and united metadata.
+                    // Do not re-merge by title or cache partial responses on the client.
+                    return@async remoteResults
+                }
+
+                if (remoteEngineUrl.isNotBlank()) {
+                    throw IllegalStateException("Search sources and backups could not be reached. Please try again.")
                 }
 
                 // Seamless fallback to embedded local providers if remote is unavailable or slow
@@ -713,7 +754,7 @@ class SearchRepository {
                     searchCache.put(cacheKey, ranked)
                     negativeCache.remove(cacheKey)
                 } else {
-                    negativeCache[cacheKey] = System.currentTimeMillis()
+                    negativeCache.remove(cacheKey)
                 }
 
                 ranked
@@ -1960,7 +2001,7 @@ class SearchRepository {
                 BookSearchType.ALL -> ""
             }
             val langParam = if (!langFilter.isNullOrBlank()) "&lang=${URLEncoder.encode(langFilter.lowercase(), "UTF-8")}" else ""
-            val url = "https://books-cloud-engine.minimal-lists.workers.dev/api/v1/books/search?q=$encodedQ$typeParam$langParam"
+            val url = "${remoteEngineUrl.removeSuffix("/v2").removeSuffix("/v1")}/api/v1/books/search?q=$encodedQ$typeParam$langParam"
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", "MinimalLists-Android/2.0")
@@ -1999,6 +2040,8 @@ class SearchRepository {
                         results.add(
                             SearchResult(
                                 title = title,
+                            engineId = obj.optString("canonicalId", obj.optString("id")),
+                            metadataJson = compactMetadataSnapshot(obj.toString()),
                                 originalTitle = obj.optString("subtitle", ""),
                                 creator = creator,
                                 coverUrl = coverUrl,
@@ -2026,7 +2069,7 @@ class SearchRepository {
     suspend fun lookupBookByIsbn(isbn: String): SearchResult? = withContext(Dispatchers.IO) {
         try {
             val cleanIsbn = isbn.replace("-", "").trim()
-            val url = "https://books-cloud-engine.minimal-lists.workers.dev/api/v1/books/isbn/$cleanIsbn"
+            val url = "${remoteEngineUrl.removeSuffix("/v2").removeSuffix("/v1")}/api/v1/books/isbn/$cleanIsbn"
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", "MinimalLists-Android/2.0")
@@ -2063,6 +2106,8 @@ class SearchRepository {
 
                         return@withContext SearchResult(
                             title = title,
+                            engineId = obj.optString("canonicalId", obj.optString("id")),
+                            metadataJson = compactMetadataSnapshot(obj.toString()),
                             originalTitle = obj.optString("subtitle", ""),
                             creator = creator,
                             coverUrl = coverUrl,

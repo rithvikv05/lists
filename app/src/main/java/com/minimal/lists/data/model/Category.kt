@@ -152,7 +152,17 @@ data class SearchResult(
     val totalPages: Int = 0,
     val isbn: String = "",
     val publisher: String = "",
-    val language: String = ""
+    val language: String = "",
+    val engineId: String = "",
+    val entityKind: String = "",
+    val totalChapters: Int = 0,
+    val totalVolumes: Int = 0,
+    val totalIssues: Int = 0,
+    val runtimeMinutes: Int = 0,
+    val genres: List<String> = emptyList(),
+    val platforms: List<String> = emptyList(),
+    // Full server result retains source references, editions and attributed alternatives.
+    val metadataJson: String = ""
 )
 
 enum class RatingScaleOption(

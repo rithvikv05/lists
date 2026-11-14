@@ -63,7 +63,7 @@ export async function lookupOpenLibraryByIsbn(isbn: string): Promise<BookMetadat
         return parseBibBook(clean, data[key]);
       }
     }
-  } catch {}
+  } catch { }
 
   const searchResults = await searchOpenLibrary(clean, 'isbn', undefined, 1);
   return searchResults[0] || null;
@@ -119,8 +119,8 @@ function parseOpenLibraryDoc(doc: any): BookMetadata | null {
   const overview = typeof doc.first_sentence === 'string'
     ? doc.first_sentence
     : Array.isArray(doc.first_sentence)
-    ? doc.first_sentence[0]
-    : undefined;
+      ? doc.first_sentence[0]
+      : undefined;
 
   const rating = doc.ratings_average ? Number(doc.ratings_average) * 2.0 : undefined; // scale to 10
   const ratingsCount = doc.ratings_count ? Number(doc.ratings_count) : undefined;

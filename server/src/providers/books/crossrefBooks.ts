@@ -1,9 +1,10 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchCrossrefBooks(query: string, year?: string): Promise<SearchResult[]> {
   try {
     const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(query)}&filter=type:book&rows=5`;
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       signal: AbortSignal.timeout(1800),
       headers: {
         'User-Agent': 'ListsEngine/2.0 (mailto:dev@minimal-lists.com)',
@@ -34,7 +35,7 @@ export async function searchCrossrefBooks(query: string, year?: string): Promise
         const title = item.title![0];
         const author = item.author?.map(a => `${a.given || ''} ${a.family || ''}`.trim()).filter(Boolean).join(', ') || item.publisher || '';
         const dateParts = item.published?.['date-parts']?.[0];
-        const pubYear = dateParts?.[0] ? String(dateParts[0]) : (year || '');
+        const pubYear = dateParts?.[0] ? String(dateParts[0]) : '';
 
         let coverUrl = '';
         if (item.ISBN && item.ISBN.length > 0) {

@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchAniList(
@@ -42,7 +43,7 @@ export async function searchAniList(
       }
     `;
 
-    const res = await fetch('https://graphql.anilist.co', {
+    const res = await providerFetch('https://graphql.anilist.co', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -79,7 +80,10 @@ export async function searchAniList(
           overview,
           rating: score,
           totalEpisodes: m.episodes || 0,
-          totalPages: m.chapters || m.volumes || 0,
+          totalPages: 0,
+          totalChapters: m.chapters || 0,
+          totalVolumes: m.volumes || 0,
+          aliases: Object.values(m.title).filter((t): t is string => typeof t === "string"),
           category: type === 'ANIME' ? 'ANIME' : 'MANGA',
           externalUrl: m.siteUrl || `https://anilist.co/${type.toLowerCase()}/${m.id}`
         });

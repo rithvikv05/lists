@@ -1,13 +1,15 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
-export async function searchBgg(query: string): Promise<SearchResult[]> {
+export async function searchBgg(query: string, token?: string): Promise<SearchResult[]> {
   const results: SearchResult[] = [];
   try {
     const term = encodeURIComponent(query.trim());
     const url = `https://boardgamegeek.com/xmlapi2/search?query=${term}&type=boardgame`;
 
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
       },
       signal: AbortSignal.timeout(2000)
@@ -24,6 +26,7 @@ export async function searchBgg(query: string): Promise<SearchResult[]> {
 
         results.push({
           title: name,
+          sourceRefs: [{ source: 'bgg', id, url: `https://boardgamegeek.com/boardgame/${id}` }],
           creator: '',
           releaseYear: year,
           releaseDate: year,

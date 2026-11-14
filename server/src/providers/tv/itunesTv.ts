@@ -1,9 +1,10 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchItunesTv(query: string, year?: string): Promise<SearchResult[]> {
   try {
     const url = `https://itunes.apple.com/search?media=tvShow&entity=tvSeason&limit=6&term=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'ListsEngine/2.0 (media-aggregator)' },
     });
@@ -25,7 +26,7 @@ export async function searchItunesTv(query: string, year?: string): Promise<Sear
     return data.results.map(item => {
       // Clean "Season X" from collectionName to get core series title
       const cleanTitle = item.collectionName.replace(/\s*,?\s*Season\s*\d+.*$/i, '').trim();
-      const releaseYear = item.releaseDate ? item.releaseDate.slice(0, 4) : (year || '');
+      const releaseYear = item.releaseDate ? item.releaseDate.slice(0, 4) : '';
       const cover = item.artworkUrl100
         ? item.artworkUrl100.replace(/100x100bb\.jpg/i, '1200x1200bb.jpg')
         : '';

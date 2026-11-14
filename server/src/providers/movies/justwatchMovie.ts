@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchJustWatchMovie(query: string, year?: string): Promise<SearchResult[]> {
@@ -9,7 +10,7 @@ export async function searchJustWatchMovie(query: string, year?: string): Promis
       content_types: ['movie'],
     };
 
-    const res = await fetch('https://apis.justwatch.com/content/titles/en_US/popular', {
+    const res = await providerFetch('https://apis.justwatch.com/content/titles/en_US/popular', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -45,7 +46,7 @@ export async function searchJustWatchMovie(query: string, year?: string): Promis
       return {
         title: item.title,
         creator: '',
-        releaseYear: item.original_release_year ? String(item.original_release_year) : (year || ''),
+        releaseYear: item.original_release_year ? String(item.original_release_year) : '',
         releaseDate: item.original_release_year ? String(item.original_release_year) : '',
         coverUrl: posterPath,
         overview: item.short_description || '',

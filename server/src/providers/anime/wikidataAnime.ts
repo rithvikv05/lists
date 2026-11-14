@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchWikidataAnime(query: string, year?: string): Promise<SearchResult[]> {
@@ -5,7 +6,7 @@ export async function searchWikidataAnime(query: string, year?: string): Promise
     const searchQuery = year ? `${query} ${year} anime` : `${query} anime series`;
     const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(searchQuery)}&utf8=&format=json&origin=*`;
     
-    const searchRes = await fetch(searchUrl, {
+    const searchRes = await providerFetch(searchUrl, {
       signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'ListsEngine/2.0 (media-aggregator)' },
     });
@@ -18,7 +19,7 @@ export async function searchWikidataAnime(query: string, year?: string): Promise
     const topTitles = items.slice(0, 5).map(i => i.title);
     const detailsUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(topTitles.join('|'))}&prop=pageimages|extracts|info&inprop=url&pithumbsize=1200&exintro=1&explaintext=1&exchars=240&format=json&origin=*`;
 
-    const detailsRes = await fetch(detailsUrl, {
+    const detailsRes = await providerFetch(detailsUrl, {
       signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'ListsEngine/2.0 (media-aggregator)' },
     });
@@ -38,7 +39,7 @@ export async function searchWikidataAnime(query: string, year?: string): Promise
       .map(p => {
         const cleanTitle = p.title.replace(/\s*\([^)]*anime[^)]*\)/i, '').trim();
         const yearMatch = p.title.match(/\b(19\d{2}|20\d{2})\b/) || p.extract?.match(/\b(19\d{2}|20\d{2})\b/);
-        const extractedYear = yearMatch ? yearMatch[1] : (year || '');
+        const extractedYear = yearMatch ? yearMatch[1] : '';
 
         return {
           title: cleanTitle,

@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchOmdbMovies(
@@ -11,7 +12,7 @@ export async function searchOmdbMovies(
     const yearParam = year ? `&y=${encodeURIComponent(year)}` : '';
     const url = `https://www.omdbapi.com/?s=${term}${yearParam}&type=movie&apikey=${apiKey}`;
 
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       headers: { 'User-Agent': 'ListsSearchEngine/1.0' },
       signal: AbortSignal.timeout(2200)
     });

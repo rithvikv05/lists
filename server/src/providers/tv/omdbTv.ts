@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchOmdbTv(query: string, year?: string, apiKey?: string): Promise<SearchResult[]> {
@@ -8,7 +9,7 @@ export async function searchOmdbTv(query: string, year?: string, apiKey?: string
     let url = `https://www.omdbapi.com/?apikey=${key}&s=${encodeURIComponent(query)}&type=series`;
     if (year) url += `&y=${year}`;
 
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'ListsEngine/2.0 (media-aggregator)' },
     });
@@ -29,7 +30,7 @@ export async function searchOmdbTv(query: string, year?: string, apiKey?: string
 
     return data.Search.map(item => {
       const yearMatch = item.Year.match(/^(\d{4})/);
-      const releaseYear = yearMatch ? yearMatch[1] : (year || '');
+      const releaseYear = yearMatch ? yearMatch[1] : '';
       const coverUrl = item.Poster && item.Poster !== 'N/A' ? item.Poster : '';
 
       return {

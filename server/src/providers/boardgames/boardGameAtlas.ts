@@ -1,9 +1,10 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchBoardGameAtlas(query: string, year?: string): Promise<SearchResult[]> {
   try {
     const url = `https://api.boardgameatlas.com/api/search?name=${encodeURIComponent(query)}&limit=6&client_id=JLBr5npPhV`;
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'ListsEngine/2.0 (media-aggregator)' },
     });
@@ -26,7 +27,7 @@ export async function searchBoardGameAtlas(query: string, year?: string): Promis
     if (!data.games || !Array.isArray(data.games)) return [];
 
     return data.games.map(game => {
-      const releaseYear = game.year_published ? String(game.year_published) : (year || '');
+      const releaseYear = game.year_published ? String(game.year_published) : '';
       const coverUrl = game.image_url || game.thumb_url || '';
       const rating = game.average_user_rating ? Math.round(game.average_user_rating * 2 * 10) / 10 : 0;
 

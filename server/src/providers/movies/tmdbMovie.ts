@@ -1,6 +1,7 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
-export async function searchTmdbMovie(query: string, year?: string, apiKey?: string): Promise<SearchResult[]> {
+export async function searchTmdbMovie(query: string, year?: string, apiKey?: string, lang?: string): Promise<SearchResult[]> {
   const token = apiKey;
   if (!token) return [];
 
@@ -8,6 +9,7 @@ export async function searchTmdbMovie(query: string, year?: string, apiKey?: str
     const isBearer = token.length > 40;
     const url = new URL('https://api.themoviedb.org/3/search/movie');
     url.searchParams.set('query', query);
+    if (lang) url.searchParams.set('language', lang);
     url.searchParams.set('include_adult', 'false');
     if (year) url.searchParams.set('year', year);
 
@@ -18,7 +20,7 @@ export async function searchTmdbMovie(query: string, year?: string, apiKey?: str
       url.searchParams.set('api_key', token);
     }
 
-    const res = await fetch(url.toString(), {
+    const res = await providerFetch(url.toString(), {
       headers,
       signal: AbortSignal.timeout(1800),
     });
@@ -31,6 +33,8 @@ export async function searchTmdbMovie(query: string, year?: string, apiKey?: str
       poster_path?: string;
       overview?: string;
       vote_average?: number;
+      vote_count?: number;
+      backdrop_path?: string;
       id: number;
     }> };
 
@@ -41,6 +45,11 @@ export async function searchTmdbMovie(query: string, year?: string, apiKey?: str
       const coverUrl = m.poster_path ? `https://image.tmdb.org/t/p/w780${m.poster_path}` : '';
       return {
         title: m.title || m.original_title || '',
+        sourceRefs: [{ source: 'tmdb', id: 'movie:' + m.id, url: `https://www.themoviedb.org/movie/${m.id}` }],
+        originalTitle: m.original_title || '',
+        aliases: [m.original_title || ''].filter(Boolean),
+        backdropUrl: m.backdrop_path ? `https://image.tmdb.org/t/p/w1280${m.backdrop_path}` : '',
+        ratings: m.vote_average ? [{ source: 'tmdb', value: m.vote_average, scale: 10, count: m.vote_count }] : [],
         creator: '',
         releaseYear,
         releaseDate: m.release_date || '',

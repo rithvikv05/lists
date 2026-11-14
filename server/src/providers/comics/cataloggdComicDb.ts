@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchCataloggdComicDb(query: string): Promise<SearchResult[]> {
@@ -6,7 +7,7 @@ export async function searchCataloggdComicDb(query: string): Promise<SearchResul
     const term = encodeURIComponent(query.trim());
     const url = `https://cataloggd.com/api/comicdb/series?q=${term}`;
 
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0' },
       signal: AbortSignal.timeout(2200)
     });
@@ -31,7 +32,8 @@ export async function searchCataloggdComicDb(query: string): Promise<SearchResul
           overview: issueCount > 0 ? `${issueCount} issues published by ${publisher}` : publisher,
           rating: 0,
           totalEpisodes: 0,
-          totalPages: issueCount,
+          totalPages: 0,
+          totalIssues: issueCount,
           category: 'COMIC',
           externalUrl: item.id ? `https://www.comics.org/series/${item.id}` : ''
         });

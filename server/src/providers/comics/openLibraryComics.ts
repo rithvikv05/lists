@@ -1,9 +1,10 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchOpenLibraryComics(query: string, year?: string): Promise<SearchResult[]> {
   try {
     const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&subject=comic_books&limit=6`;
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'ListsEngine/2.0 (media-aggregator)' },
     });
@@ -23,7 +24,7 @@ export async function searchOpenLibraryComics(query: string, year?: string): Pro
     if (!data.docs) return [];
 
     return data.docs.map(doc => {
-      const releaseYear = doc.first_publish_year ? String(doc.first_publish_year) : (year || '');
+      const releaseYear = doc.first_publish_year ? String(doc.first_publish_year) : '';
       const coverUrl = doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg` : '';
       const rating = doc.ratings_average ? Math.round(doc.ratings_average * 20) / 10 : 0;
 

@@ -113,7 +113,7 @@ object RatingConverter {
      * External database ratings (item.rating) are NEVER counted unless the user explicitly saved a rating.
      */
     fun isRatedByUser(item: ListItem): Boolean {
-        return (item.reviewRating in 1..4) || (item.userRating > 0f) || (item.rating > 0f)
+        return (item.reviewRating in 1..4) || (item.userRating > 0f)
     }
 
     /**

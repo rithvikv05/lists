@@ -45,10 +45,6 @@ import coil.Coil
 import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
-import okhttp3.ConnectionPool
-import okhttp3.Dispatcher
-import okhttp3.OkHttpClient
-import java.util.concurrent.TimeUnit
 import com.minimal.lists.data.model.Category
 import com.minimal.lists.data.repository.AppRepository
 import com.minimal.lists.data.sync.DriveSyncManager
@@ -64,21 +60,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // High-performance image loading pipeline: 25% RAM cache, 150MB disk cache, connection pool & browser User-Agent
+        // Shared image client retries unreachable CDNs through the cached engine relay.
         try {
-            val coilClient = OkHttpClient.Builder()
-                .connectionPool(ConnectionPool(32, 5, TimeUnit.MINUTES))
-                .dispatcher(Dispatcher().apply {
-                    maxRequests = 64
-                    maxRequestsPerHost = 16
-                })
-                .addInterceptor { chain ->
-                    val request = chain.request().newBuilder()
-                        .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36")
-                        .build()
-                    chain.proceed(request)
-                }
-                .build()
+            val coilClient = com.minimal.lists.data.api.CoverHttpClient.create()
 
             val imageLoader = ImageLoader.Builder(applicationContext)
                 .memoryCache {

@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchAnilistManga(query: string, year?: string): Promise<SearchResult[]> {
@@ -36,7 +37,7 @@ export async function searchAnilistManga(query: string, year?: string): Promise<
   `;
 
   try {
-    const res = await fetch('https://graphql.anilist.co', {
+    const res = await providerFetch('https://graphql.anilist.co', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -73,7 +74,7 @@ export async function searchAnilistManga(query: string, year?: string): Promise<
 
     return mediaList.map(item => {
       const title = item.title.english || item.title.romaji || item.title.native || '';
-      const releaseYear = item.startDate?.year ? String(item.startDate.year) : (year || '');
+      const releaseYear = item.startDate?.year ? String(item.startDate.year) : '';
       const coverUrl = item.coverImage?.extraLarge || item.coverImage?.large || '';
       const rawRating = item.averageScore ? item.averageScore / 10 : 0;
       const creator = item.staff?.nodes?.[0]?.name?.full || '';
@@ -87,7 +88,9 @@ export async function searchAnilistManga(query: string, year?: string): Promise<
         overview: item.description || '',
         rating: Math.round(rawRating * 10) / 10,
         totalEpisodes: 0,
-        totalPages: item.chapters || 0,
+        totalPages: 0,
+        totalChapters: item.chapters || 0,
+        totalVolumes: item.volumes || 0,
         category: 'MANGA' as const,
         externalUrl: item.siteUrl || `https://anilist.co/manga/${item.id}`,
       };

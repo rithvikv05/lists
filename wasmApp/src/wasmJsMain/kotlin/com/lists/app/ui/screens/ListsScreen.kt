@@ -73,8 +73,8 @@ import com.lists.app.ui.components.*
 import com.lists.app.ui.theme.*
 
 enum class ListsSortOption(val displayName: String) {
-    RECENT("Recent"),
-    ALPHABETICAL("A – Z"),
+    RECENT("Recently Updated"),
+    ALPHABETICAL("Name"),
     ITEM_COUNT("Item Count")
 }
 
@@ -109,6 +109,7 @@ fun ListsScreen(
     var selectedCategoryFilter by remember(initialCategory) { mutableStateOf(initialCategory) }
     var isArchiveSelected by remember(initialArchive) { mutableStateOf(initialArchive) }
     var sortOption by remember { mutableStateOf(ListsSortOption.RECENT) }
+    var sortDescending by remember { mutableStateOf(true) }
     var searchQuery by remember { mutableStateOf("") }
     var showSearchBar by remember { mutableStateOf(false) }
 
@@ -200,7 +201,7 @@ fun ListsScreen(
         listsWithStats.count { it.list.isArchived }
     }
 
-    val displayedLists = remember(listsWithStats, selectedCategoryFilter, isArchiveSelected, sortOption, searchQuery) {
+    val displayedLists = remember(listsWithStats, selectedCategoryFilter, isArchiveSelected, sortOption, sortDescending, searchQuery) {
         var result = if (isArchiveSelected) {
             listsWithStats.filter { it.list.isArchived }
         } else {
@@ -219,7 +220,7 @@ fun ListsScreen(
             }
         }
         val isCompleted = { it: ListWithStats -> it.itemCount > 0 && it.completedCount >= it.itemCount }
-        when (sortOption) {
+        val ordered = when (sortOption) {
             ListsSortOption.RECENT -> result.sortedWith(
                 compareByDescending<ListWithStats> { it.list.pinned }
                     .thenBy { isCompleted(it) }
@@ -230,12 +231,15 @@ fun ListsScreen(
                     .thenBy { isCompleted(it) }
                     .thenBy { it.list.name.lowercase() }
             )
+
             ListsSortOption.ITEM_COUNT -> result.sortedWith(
                 compareByDescending<ListWithStats> { it.list.pinned }
                     .thenBy { isCompleted(it) }
                     .thenByDescending { it.itemCount }
             )
         }
+        val reverse = sortDescending != (sortOption != ListsSortOption.ALPHABETICAL)
+        if (reverse) ordered.groupBy { Pair(it.list.pinned, isCompleted(it)) }.values.flatMap { it.reversed() } else ordered
     }
 
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
@@ -736,6 +740,7 @@ fun ListsScreen(
                                 val cat = Category.fromId(listWithStats.list.category)
                                 val isSelected = selectedListIds.contains(listWithStats.list.id)
                                 val inSelectionMode = selectedListIds.isNotEmpty()
+
                                 DiscreteListCard(
                                     title = listWithStats.list.name,
                                     category = cat,
@@ -774,6 +779,7 @@ fun ListsScreen(
                                 val cat = Category.fromId(listWithStats.list.category)
                                 val isSelected = selectedListIds.contains(listWithStats.list.id)
                                 val inSelectionMode = selectedListIds.isNotEmpty()
+
                                 BentoCollectionCard(
                                     title = listWithStats.list.name,
                                     category = cat,
@@ -984,7 +990,9 @@ fun ListsScreen(
                     val isSelected = option == sortOption
                     Surface(
                         onClick = {
-                            sortOption = option
+                            if (sortOption == option) sortDescending = !sortDescending
+                            else { sortOption = option; sortDescending = option != ListsSortOption.ALPHABETICAL }
+
                             showSortSheet = false
                             triggerAsmrTick(context)
                         },
@@ -998,7 +1006,7 @@ fun ListsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = option.displayName,
+                                text = option.displayName + if (if (isSelected) sortDescending else option != ListsSortOption.ALPHABETICAL) "  ↓" else "  ↑",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface

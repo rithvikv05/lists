@@ -1,3 +1,5 @@
+import { providerFetch } from '../http';
+import { extraProductTitle } from '../../search/gamePolicy';
 import { SearchResult } from '../../types';
 
 export async function searchSteamStore(query: string): Promise<SearchResult[]> {
@@ -6,7 +8,7 @@ export async function searchSteamStore(query: string): Promise<SearchResult[]> {
     const term = encodeURIComponent(query.trim());
     const url = `https://store.steampowered.com/api/storesearch/?term=${term}&l=english&cc=US`;
 
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
         'Accept': 'application/json'
@@ -20,15 +22,15 @@ export async function searchSteamStore(query: string): Promise<SearchResult[]> {
       for (const item of items) {
         if (!item.name) continue;
 
-        let img = item.tiny_image || '';
-        // Upgrade steam thumbnail to full header
-        if (img) {
-          img = img.replace('/capsule_sm_120.jpg', '/header.jpg').replace('/capsule_184x69.jpg', '/header.jpg');
-        }
+        if (!/^\d+$/.test(String(item.id)) || (item.type && item.type !== 'app')) continue;
+        // Keep the supplied URL. Rewriting a capsule URL to an invented header path breaks artwork.
+        const img = typeof item.tiny_image === 'string' ? item.tiny_image : '';
 
         results.push({
           title: item.name,
-          creator: item.price ? `$${(item.price.final / 100).toFixed(2)}` : '',
+          entityKind: extraProductTitle(item.name) ? 'game_extra' : undefined,
+          creator: '',
+          sourceRefs: [{ source: 'steam', id: String(item.id), url: `https://store.steampowered.com/app/${item.id}` }],
           releaseYear: '',
           releaseDate: '',
           coverUrl: img,

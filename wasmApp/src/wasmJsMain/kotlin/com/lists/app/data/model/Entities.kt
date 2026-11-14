@@ -62,6 +62,8 @@ data class ListItem(
     val isbn: String = "",
     val bookLanguage: String = "",
     val publisher: String = "",
+    val metadataId: String = "",
+    val metadataJson: String = "",
     val readingSessionsJson: String = "",
     val gamePlatform: String = "",
     val customOrder: Int = 0,

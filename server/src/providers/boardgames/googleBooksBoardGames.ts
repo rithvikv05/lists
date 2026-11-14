@@ -1,10 +1,11 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchGoogleBooksBoardGames(query: string, year?: string): Promise<SearchResult[]> {
   try {
     const q = `${query} board game`;
     const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=6&printType=books`;
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'ListsEngine/2.0 (media-aggregator)' },
     });
@@ -30,7 +31,7 @@ export async function searchGoogleBooksBoardGames(query: string, year?: string):
 
     return data.items.map(item => {
       const v = item.volumeInfo;
-      const releaseYear = v.publishedDate ? v.publishedDate.slice(0, 4) : (year || '');
+      const releaseYear = v.publishedDate ? v.publishedDate.slice(0, 4) : '';
       let cover = v.imageLinks?.thumbnail || v.imageLinks?.smallThumbnail || '';
       if (cover.startsWith('http://')) cover = cover.replace('http://', 'https://');
 

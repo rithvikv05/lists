@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchImdbTv(query: string, year?: string): Promise<SearchResult[]> {
@@ -7,7 +8,7 @@ export async function searchImdbTv(query: string, year?: string): Promise<Search
     const prefix = clean.slice(0, 1);
     const url = `https://v3.sg.media-imdb.com/suggestion/x/${prefix}/${encodeURIComponent(clean)}.json`;
 
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       signal: AbortSignal.timeout(1800),
       headers: { 'User-Agent': 'ListsEngine/2.0 (media-aggregator)' },
     });
@@ -32,7 +33,7 @@ export async function searchImdbTv(query: string, year?: string): Promise<Search
       })
       .slice(0, 6)
       .map(item => {
-        let releaseYear = item.y ? String(item.y) : (year || '');
+        let releaseYear = item.y ? String(item.y) : '';
         if (item.yr) {
           const yrMatch = item.yr.match(/^(\d{4})/);
           if (yrMatch) releaseYear = yrMatch[1];

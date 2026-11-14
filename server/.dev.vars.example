@@ -1,9 +1,16 @@
 # Cloudflare Workers Local Development Secrets (Wrangler)
 # Copy this file to .dev.vars to load secrets locally during `npm run dev`
 ENVIRONMENT="development"
-OMDB_API_KEY="trilogy"
+OMDB_API_KEY=""
 TMDB_API_KEY=""
 HARDCOVER_API_TOKEN=""
 COMIC_VINE_API_KEY=""
 TWITCH_CLIENT_ID=""
 TWITCH_CLIENT_SECRET=""
+
+# Unified book engine and registered board-game API
+GOOGLE_BOOKS_API_KEY=""
+ISBNDB_API_KEY=""
+BGG_API_TOKEN=""
+# Enable only after confirming eligibility for this list/tracker product.
+ENABLE_ANILIST="false"

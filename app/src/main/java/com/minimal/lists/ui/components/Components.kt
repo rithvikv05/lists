@@ -239,6 +239,7 @@ fun CoverImage(
     val context = LocalContext.current
     val storageManager = remember { OfflineStorageManager.getInstance(context) }
     val modelData = remember(uuid, url) { storageManager.getDisplayCover(uuid, url) }
+    var imageFailed by remember(modelData) { mutableStateOf(false) }
     val hasValidImage = (url.isNotBlank() && url != "null") || (modelData is java.io.File && modelData.exists())
 
     Box(
@@ -255,8 +256,21 @@ fun CoverImage(
                     .diskCachePolicy(if (modelData is java.io.File) CachePolicy.DISABLED else CachePolicy.ENABLED)
                     .build(),
                 contentDescription = null,
+                onError = { error ->
+                    imageFailed = true
+                    android.util.Log.w("CoverImage", "Unable to load cover", error.result.throwable)
+                },
+                onSuccess = { imageFailed = false },
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
+            )
+        }
+        if (!hasValidImage || imageFailed) {
+            Icon(
+                painter = painterResource(category.iconRes),
+                contentDescription = "Cover unavailable",
+                tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                modifier = Modifier.align(Alignment.Center).size(24.dp)
             )
         }
     }

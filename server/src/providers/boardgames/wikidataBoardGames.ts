@@ -1,3 +1,4 @@
+import { providerFetch } from '../http';
 import { SearchResult } from '../../types';
 
 export async function searchWikidataBoardGames(query: string): Promise<SearchResult[]> {
@@ -6,7 +7,7 @@ export async function searchWikidataBoardGames(query: string): Promise<SearchRes
     const term = encodeURIComponent(query.trim());
     const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${term}&language=en&type=item&limit=15&format=json`;
 
-    const res = await fetch(url, {
+    const res = await providerFetch(url, {
       headers: { 'User-Agent': 'ListsSearchEngine/1.0 (contact@listsapp.com)' },
       signal: AbortSignal.timeout(2200)
     });

@@ -16,18 +16,17 @@ If you love movies, binge TV series, read books and comics, follow seasonal anim
 ## Key Features
 
 ### 🔍 Universal Media Aggregator & Search Engine
-Fetch accurate metadata, release years, cover artwork, and progress breakdowns across virtually any medium:
-- **Intelligent Query Normalization**: Automatic 4-digit release year extraction (`"Dune 1984"`), bi-directional Roman numeral mapping (`"Final Fantasy VII"` $\leftrightarrow$ `"Final Fantasy 7"`), diacritic folding (`Pokémon` $\rightarrow$ `Pokemon`), and leading article filtering.
-- **Typo Tolerance & Fuzzy Scoring**: Sub-string Levenshtein edit distance and word-order-invariant token Jaccard similarity to rank relevant results instantly.
-- **Parallel Provider Pipeline**:
-  - **Movies**: Primary: iTunes Movies (`1200x1200bb`) & IMDb Suggestions; Fallback: OMDb API & Wikipedia.
-  - **TV Shows & Anime**: TVMaze, AniList GraphQL (English + Romaji + Native Japanese titles), MangaDex, JustWatch.
-  - **Books**: Primary: Apple Books (`1200x1200bb`); Backup: Open Library (`-L.jpg`); Fallback: Hardcover GraphQL & Google Books.
-  - **Comics**: Cataloggd / Grand Comics Database (GCD), GetComics, Apple Books, and Google Books.
-  - **Video Games**: IMDb Suggestions (video games), Steam Store, and Wikipedia.
-  - **Board Games**: Dedicated Wikipedia Board Game search with 600px box art, Wikidata tabletop entities, and BoardGameGeek.
-- **Request Coalescing & Negative Caching**: In-flight concurrency coalescing and 10-minute negative caching for empty queries to eliminate redundant network load.
-- **Custom / Manual Entries**: Manually track any item with custom titles, notes, external links, and your own cover images.
+
+Media and book search now share one backend. It combines compatible records from multiple catalogs, retains source IDs and metadata provenance, and preserves book edition details instead of merging by stripped titles alone.
+
+- Parallel, deadline-bounded provider discovery with ID-based enrichment for top movie/TV/Steam candidates.
+- Rich book metadata, checksum-validated ISBN lookup, reading-speed calculations from the integrated book engine.
+- Separate page, episode, chapter, volume and issue counts; attributed ratings and alternate metadata values.
+- Goodreads and Steam link resolution with recoverable partial results.
+- Android/Web retain typed tracking fields and compact metadata references when saving and syncing items.
+- Manual entries remain available for missing or unsupported records.
+
+See [the unified engine documentation](server/README.md) for current provider configuration, API paths, tests and remaining architecture work. Source coverage and latency depend on provider availability; missing facts remain unknown.
 
 ---
 

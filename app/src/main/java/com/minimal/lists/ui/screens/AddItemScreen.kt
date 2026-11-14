@@ -165,15 +165,24 @@ fun AddItemScreen(
         if (q.length >= 2) {
             isLoading = true
             delay(160)
-            val results = searchRepo.search(
-                query = q,
-                category = activeCategory,
-                bookSearchType = bookSearchType,
-                yearFilter = selectedYear,
-                langFilter = selectedLanguage
-            )
-            searchResults = results
-            isLoading = false
+            try {
+                val results = searchRepo.search(
+                    query = q,
+                    category = activeCategory,
+                    bookSearchType = bookSearchType,
+                    yearFilter = selectedYear,
+                    langFilter = selectedLanguage
+                )
+                searchResults = results
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                searchResults = emptyList()
+                isLoading = false
+                snackbarHostState.showSnackbar("Search is temporarily unavailable. Please try again.")
+            } finally {
+                isLoading = false
+            }
         } else {
             searchResults = emptyList()
             isLoading = false

@@ -15,6 +15,7 @@ import com.minimal.lists.data.db.ListWithStats
 import com.minimal.lists.data.db.UserList
 import com.minimal.lists.data.model.Category
 import com.minimal.lists.data.model.ItemStatus
+import com.minimal.lists.data.api.compactMetadataSnapshot
 import com.minimal.lists.data.model.SearchResult
 
 class AppRepository(private val context: Context) {
@@ -71,13 +72,6 @@ class AppRepository(private val context: Context) {
         )
         notifyDataChanged()
         id
-    }
-
-    suspend fun reorderLists(reorderedIds: List<Long>) = withContext(Dispatchers.IO) {
-        reorderedIds.forEachIndexed { index, id ->
-            listDao.updateCustomOrder(id, index)
-        }
-        notifyDataChanged()
     }
 
     suspend fun updateList(list: UserList) = withContext(Dispatchers.IO) {
@@ -254,7 +248,10 @@ class AppRepository(private val context: Context) {
             totalPages = search.totalPages,
             isbn = search.isbn,
             bookLanguage = search.language,
-            publisher = search.publisher
+            publisher = search.publisher,
+            metadataId = search.engineId,
+            metadataJson = compactMetadataSnapshot(search.metadataJson),
+            gamePlatform = search.platforms.joinToString(", ")
         )
         val insertedId = itemDao.insertItem(item)
         notifyDataChanged()
@@ -275,7 +272,7 @@ class AppRepository(private val context: Context) {
                 } catch (_: Exception) {}
             }
         }
-        if (search.category == Category.BOOK && search.totalPages <= 0) {
+        if (search.category == Category.BOOK && search.totalPages <= 0 && search.isbn.isNotBlank()) {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     val searchRepo = SearchRepository()
@@ -620,6 +617,8 @@ class AppRepository(private val context: Context) {
             obj.put("isbn", it.isbn)
             obj.put("bookLanguage", it.bookLanguage)
             obj.put("publisher", it.publisher)
+            obj.put("metadataId", it.metadataId)
+            obj.put("metadataJson", it.metadataJson)
             obj.put("readingSessionsJson", it.readingSessionsJson)
             obj.put("createdAt", it.createdAt)
             obj.put("updatedAt", it.updatedAt)
@@ -722,6 +721,8 @@ class AppRepository(private val context: Context) {
                     bookLanguage = obj.optString("bookLanguage", ""),
                     publisher = obj.optString("publisher", ""),
                     readingSessionsJson = obj.optString("readingSessionsJson", ""),
+                    metadataId = obj.optString("metadataId", ""),
+                    metadataJson = compactMetadataSnapshot(obj.optString("metadataJson", "")),
                     createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                     updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
                 )
@@ -947,7 +948,15 @@ class AppRepository(private val context: Context) {
                     val remoteTitle = remoteObj.optString("title", "").trim()
                     if (remoteTitle.isNotBlank()) {
                         val matchingItem = itemDao.getItemsForListSync(parentList.id).firstOrNull {
-                            it.title.trim().equals(remoteTitle, ignoreCase = true)
+                            val remoteMetadataId = remoteObj.optString("metadataId", "")
+                            if (it.metadataId.isNotBlank() || remoteMetadataId.isNotBlank()) {
+                                it.metadataId.isNotBlank() && it.metadataId == remoteMetadataId
+                            } else {
+                                it.title.trim().equals(remoteTitle, ignoreCase = true) &&
+                                    it.category == remoteObj.optString("category", "MOVIE") &&
+                                    it.creator == remoteObj.optString("creator", "") &&
+                                    it.releaseYear == remoteObj.optString("releaseYear", "")
+                            }
                         }
                         if (matchingItem != null) {
                             val updated = matchingItem.copy(uuid = uuid)
@@ -989,6 +998,12 @@ class AppRepository(private val context: Context) {
                             currentPage = remoteObj.optInt("currentPage", 0),
                             totalPages = remoteObj.optInt("totalPages", 0),
                             gamePlatform = remoteObj.optString("gamePlatform", ""),
+                            metadataId = remoteObj.optString("metadataId", ""),
+                            metadataJson = compactMetadataSnapshot(remoteObj.optString("metadataJson", "")),
+                            isbn = remoteObj.optString("isbn", ""),
+                            publisher = remoteObj.optString("publisher", ""),
+                            bookLanguage = remoteObj.optString("bookLanguage", ""),
+                            readingSessionsJson = remoteObj.optString("readingSessionsJson", ""),
                             customOrder = remoteObj.optInt("customOrder", 0),
                             reviewRating = remoteObj.optInt("reviewRating", 0),
                             checkedEpisodesJson = remoteObj.optString("checkedEpisodesJson", ""),
@@ -1029,6 +1044,12 @@ class AppRepository(private val context: Context) {
                                 currentPage = remoteObj.optInt("currentPage", localItem.currentPage),
                                 totalPages = remoteObj.optInt("totalPages", localItem.totalPages),
                                 gamePlatform = remoteObj.optString("gamePlatform", localItem.gamePlatform),
+                                metadataId = remoteObj.optString("metadataId", localItem.metadataId),
+                                metadataJson = compactMetadataSnapshot(remoteObj.optString("metadataJson", localItem.metadataJson)),
+                                isbn = remoteObj.optString("isbn", localItem.isbn),
+                                publisher = remoteObj.optString("publisher", localItem.publisher),
+                                bookLanguage = remoteObj.optString("bookLanguage", localItem.bookLanguage),
+                                readingSessionsJson = remoteObj.optString("readingSessionsJson", localItem.readingSessionsJson),
                                 customOrder = remoteObj.optInt("customOrder", localItem.customOrder),
                                 reviewRating = remoteObj.optInt("reviewRating", localItem.reviewRating),
                                 checkedEpisodesJson = remoteObj.optString("checkedEpisodesJson", localItem.checkedEpisodesJson),

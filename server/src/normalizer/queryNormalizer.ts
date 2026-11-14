@@ -5,7 +5,7 @@ export interface NormalizedQuery {
   variants: string[];
 }
 
-const YEAR_REGEX = /\b(19\d{2}|20\d{2})\b/;
+const YEAR_REGEX = /\s+\(((?:18|19|20)\d{2})\)\s*$/;
 
 const ROMAN_TO_ARABIC: [RegExp, string][] = [
   [/\bVIII\b/gi, '8'],
@@ -56,10 +56,10 @@ export function normalizeQuery(input: string): NormalizedQuery {
   const trimmed = input.trim();
   const folded = foldDiacritics(trimmed);
   const yearMatch = folded.match(YEAR_REGEX);
-  const extractedYear = yearMatch ? yearMatch[0] : undefined;
+  const extractedYear = yearMatch ? yearMatch[1] : undefined;
 
   let cleanQuery = extractedYear
-    ? folded.replace(extractedYear, '').replace(/\s+/g, ' ').trim()
+    ? folded.replace(YEAR_REGEX, '').replace(/\s+/g, ' ').trim()
     : folded;
 
   if (!cleanQuery) cleanQuery = trimmed;

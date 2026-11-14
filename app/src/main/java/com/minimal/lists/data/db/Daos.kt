@@ -39,9 +39,6 @@ interface ListDao {
     @Query("SELECT MIN(customOrderIndex) FROM lists")
     suspend fun getMinOrderIndex(): Int?
 
-    @Query("UPDATE lists SET customOrderIndex = :orderIndex WHERE id = :id")
-    suspend fun updateCustomOrder(id: Long, orderIndex: Int)
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertList(list: UserList): Long
 

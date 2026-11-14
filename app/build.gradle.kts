@@ -21,6 +21,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            versionNameSuffix = "-search-v2-fix2"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -98,5 +101,6 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation("junit:junit:4.13.2")
 }
 

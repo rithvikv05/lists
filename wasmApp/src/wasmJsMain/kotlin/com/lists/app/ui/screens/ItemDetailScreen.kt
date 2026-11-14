@@ -1248,6 +1248,7 @@ fun RatingCardSection(
     scope: kotlinx.coroutines.CoroutineScope,
     context: Context
 ) {
+    val personalRating = if (RatingConverter.isRatedByUser(item)) item.rating else 0f
     val ratingPrefs = remember { context.getSharedPreferences("lists_rating_prefs", Context.MODE_PRIVATE) }
     val listScaleId = remember(item.listId) {
         ratingPrefs.getString("list_rating_scale_${item.listId}", "STARS_5") ?: "STARS_5"
@@ -1275,17 +1276,17 @@ fun RatingCardSection(
                     )
 
                     val currentTier = when {
-                        item.rating >= 8.75f -> "Perfection"
-                        item.rating >= 6.25f -> "Go for it"
-                        item.rating >= 3.75f -> "Timepass"
-                        item.rating >= 1.25f -> "Skip"
+                        personalRating >= 8.75f -> "Perfection"
+                        personalRating >= 6.25f -> "Go for it"
+                        personalRating >= 3.75f -> "Timepass"
+                        personalRating >= 1.25f -> "Skip"
                         else -> "—"
                     }
                     Text(
                         text = currentTier,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = if (item.rating > 0f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (personalRating > 0f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -1306,7 +1307,7 @@ fun RatingCardSection(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     tiers.forEach { (label, value) ->
-                        val isSelected = kotlin.math.abs(item.rating - value) < 1.25f && item.rating > 0f
+                        val isSelected = kotlin.math.abs(personalRating - value) < 1.25f && personalRating > 0f
                         Text(
                             text = label,
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
@@ -1362,22 +1363,22 @@ fun RatingCardSection(
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    val formattedScore = formatDecimal1(item.rating)
+                    val formattedScore = formatDecimal1(personalRating)
                     Text(
-                        text = if (item.rating > 0f) "$formattedScore / 10" else "— / 10",
+                        text = if (personalRating > 0f) "$formattedScore / 10" else "— / 10",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = if (item.rating > 0f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (personalRating > 0f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Slider(
-                    value = item.rating.coerceIn(0f, 10f),
+                    value = personalRating.coerceIn(0f, 10f),
                     onValueChange = { newRating10 ->
                         val rounded10 = (newRating10 * 10f).roundToInt() / 10f
-                        if (rounded10 != item.rating) {
+                        if (rounded10 != personalRating) {
                             triggerAsmrTick(context)
                             scope.launch {
                                 repository.updateItem(
@@ -1457,23 +1458,23 @@ fun RatingCardSection(
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    val formatted5 = formatDecimal1(item.rating / 2.0f)
+                    val formatted5 = formatDecimal1(personalRating / 2.0f)
                     Text(
-                        text = if (item.rating > 0f) "$formatted5 / 5" else "— / 5",
+                        text = if (personalRating > 0f) "$formatted5 / 5" else "— / 5",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = if (item.rating > 0f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (personalRating > 0f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Slider(
-                    value = (item.rating / 2.0f).coerceIn(0f, 5f),
+                    value = (personalRating / 2.0f).coerceIn(0f, 5f),
                     onValueChange = { newRating5 ->
                         val rounded5 = (newRating5 * 10f).roundToInt() / 10f
                         val newRating10 = rounded5 * 2.0f
-                        if (newRating10 != item.rating) {
+                        if (newRating10 != personalRating) {
                             triggerAsmrTick(context)
                             scope.launch {
                                 repository.updateItem(

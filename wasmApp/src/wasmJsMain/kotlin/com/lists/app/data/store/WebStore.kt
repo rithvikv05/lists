@@ -1,5 +1,6 @@
 package com.lists.app.data.store
 
+import com.lists.app.data.api.compactMetadataSnapshot
 import com.lists.app.currentTimeMillis
 import com.lists.app.data.model.*
 import kotlinx.browser.localStorage
@@ -201,21 +202,13 @@ object WebStore {
         saveToStorage()
     }
 
-    fun reorderLists(reorderedIds: List<Long>) {
-        val map = reorderedIds.mapIndexed { idx, id -> id to idx }.toMap()
-        _lists.value = _lists.value.map { list ->
-            val order = map[list.id]
-            if (order != null) list.copy(customOrderIndex = order) else list
-        }
-        saveToStorage()
-    }
-
     fun addItem(item: ListItem) {
         val now = currentTimeMillis()
         val maxId = _items.value.maxOfOrNull { it.id } ?: 0L
         val newItem = item.copy(
             id = if (item.id == 0L) maxId + 1 else item.id,
             uuid = if (item.uuid.isEmpty()) generateUuid() else item.uuid,
+            metadataJson = compactMetadataSnapshot(item.metadataJson),
             createdAt = if (item.createdAt == 0L) now else item.createdAt,
             updatedAt = now
         )
@@ -304,7 +297,7 @@ object WebStore {
         return try {
             val backup = json.decodeFromString<BackupData>(jsonString)
             _lists.value = backup.lists
-            _items.value = backup.items
+            _items.value = backup.items.map { it.copy(metadataJson = compactMetadataSnapshot(it.metadataJson)) }
             _tombstones.value = backup.tombstones
             saveToStorage()
             true
@@ -418,7 +411,7 @@ object WebStore {
             saveAutoBackup()
 
             _lists.value = backup.lists
-            _items.value = backup.items
+            _items.value = backup.items.map { it.copy(metadataJson = compactMetadataSnapshot(it.metadataJson)) }
             _tombstones.value = backup.tombstones
             saveToStorage()
             println("Restored from $key (${backup.lists.size} lists, ${backup.items.size} items)")
@@ -527,7 +520,7 @@ object WebStore {
 
             val assignedListId = targetList?.let { assignedListMap[it.uuid] ?: it.id } ?: ri.listId
             val remappedListUuid = targetList?.uuid ?: ri.listUuid
-            val remapped = ri.copy(listId = assignedListId, listUuid = remappedListUuid)
+            val remapped = ri.copy(listId = assignedListId, listUuid = remappedListUuid, metadataJson = compactMetadataSnapshot(ri.metadataJson))
 
             val existing = mergedItemsMap[ri.uuid]
             if (existing == null) {

@@ -8,7 +8,6 @@ import com.minimal.lists.data.db.ListItem
 import com.minimal.lists.data.repository.AppRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,7 +16,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
-import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -67,10 +65,7 @@ class OfflineStorageManager(private val context: Context) {
         }
     }
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .build()
+    private val httpClient = com.minimal.lists.data.api.CoverHttpClient.create()
 
     var storageMode: OfflineStorageMode
         get() = OfflineStorageMode.fromId(prefs.getString(KEY_STORAGE_MODE, OfflineStorageMode.IMMEDIATE_OFFLINE.id))
@@ -132,10 +127,10 @@ class OfflineStorageManager(private val context: Context) {
                 .header("User-Agent", "Mozilla/5.0 (Linux; Android 10)")
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext null
-
-            val bytes = response.body?.bytes() ?: return@withContext null
+            val bytes = httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                response.body?.bytes() ?: return@withContext null
+            }
 
             // Decode dimensions first to avoid memory overhead
             val options = BitmapFactory.Options().apply {

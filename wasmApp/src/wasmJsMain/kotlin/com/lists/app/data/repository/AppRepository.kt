@@ -7,6 +7,7 @@ import com.lists.app.data.db.ListWithStats
 import com.lists.app.data.db.UserList
 import com.lists.app.data.model.Category
 import com.lists.app.data.model.ItemStatus
+import com.lists.app.data.api.compactMetadataSnapshot
 import com.lists.app.data.model.SearchResult
 import com.lists.app.data.store.WebStore
 import kotlinx.coroutines.flow.Flow
@@ -70,10 +71,6 @@ class AppRepository(val context: Any? = null) {
         val cat = Category.fromId(category)
         val created = WebStore.addList(name, cat)
         return created.id
-    }
-
-    suspend fun reorderLists(reorderedIds: List<Long>) {
-        WebStore.reorderLists(reorderedIds)
     }
 
     suspend fun updateList(list: UserList) {
@@ -149,10 +146,13 @@ class AppRepository(val context: Any? = null) {
             totalPages = result.totalPages,
             isbn = result.isbn,
             bookLanguage = result.language,
-            publisher = result.publisher
+            publisher = result.publisher,
+            metadataId = result.engineId,
+            metadataJson = compactMetadataSnapshot(result.metadataJson),
+            gamePlatform = result.platforms.joinToString(", ")
         )
         WebStore.addItem(item)
-        if (result.category == Category.BOOK && result.totalPages <= 0) {
+        if (result.category == Category.BOOK && result.totalPages <= 0 && result.isbn.isNotBlank()) {
             CoroutineScope(Dispatchers.Default).launch {
                 try {
                     val searchRepo = SearchRepository()

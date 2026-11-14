@@ -1,0 +1,10 @@
+[
+  { "query": "the velvet knife by maureen johnson", "category": "BOOK", "expectedTitle": "The Velvet Knife", "expectedCreator": "Maureen Johnson" },
+  { "query": "the velvet knife", "category": "BOOK", "expectedTitle": "The Velvet Knife", "expectedCreator": "Maureen Johnson" },
+  { "query": "Portal", "category": "GAME", "expectedTitle": "Portal", "expectedCreator": "Valve" },
+  { "query": "Elden Ring", "category": "GAME", "expectedTitle": "Elden Ring", "expectedRef": { "source": "igdb", "id": "119133" } },
+  { "query": "Interstellar", "category": "MOVIE", "expectedTitle": "Interstellar", "expectedRef": { "source": "tmdb", "id": "movie:157336" } },
+  { "query": "Breaking Bad", "category": "TV_SHOW", "expectedTitle": "Breaking Bad", "expectedRef": { "source": "tmdb", "id": "tv:1396" } },
+  { "query": "Cowboy Bebop", "category": "ANIME", "expectedTitle": "Cowboy Bebop" },
+  { "query": "Berserk", "category": "MANGA", "expectedTitle": "Berserk" }
+]
