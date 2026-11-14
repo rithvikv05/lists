@@ -66,6 +66,7 @@ import com.minimal.lists.data.db.ListWithStats
 import com.minimal.lists.data.db.UserList
 import com.minimal.lists.data.model.Category
 import com.minimal.lists.data.model.HomeLayoutMode
+import com.minimal.lists.data.model.layoutPreferences
 import com.minimal.lists.data.repository.AppRepository
 import com.minimal.lists.data.sync.DriveSyncManager
 import com.minimal.lists.data.sync.GoogleSignInHelper
@@ -95,11 +96,11 @@ fun ListsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
-    val uiPrefs = remember { context.getSharedPreferences("lists_ui_prefs", Context.MODE_PRIVATE) }
+    val uiPrefs = remember { layoutPreferences(context) }
 
-    // Home Layout Mode (Discrete 1 vs Bento Grid)
-    var homeLayoutMode by remember {
-        val saved = uiPrefs.getString("home_layout_mode", HomeLayoutMode.DISCRETE.name)
+    // Category lists layout is independent from the home screen.
+    var categoryLayoutMode by remember {
+        val saved = uiPrefs.getString("category_layout_mode", HomeLayoutMode.DISCRETE.name)
         mutableStateOf(
             try { HomeLayoutMode.valueOf(saved ?: HomeLayoutMode.DISCRETE.name) }
             catch (_: Exception) { HomeLayoutMode.DISCRETE }
@@ -191,9 +192,9 @@ fun ListsScreen(
     }
 
     LaunchedEffect(Unit) {
-        // Listen for prefs changes in case altered in Settings
-        val saved = uiPrefs.getString("home_layout_mode", HomeLayoutMode.DISCRETE.name)
-        homeLayoutMode = try { HomeLayoutMode.valueOf(saved ?: HomeLayoutMode.DISCRETE.name) }
+        // Restore the category lists layout when this screen is entered.
+        val saved = uiPrefs.getString("category_layout_mode", HomeLayoutMode.DISCRETE.name)
+        categoryLayoutMode = try { HomeLayoutMode.valueOf(saved ?: HomeLayoutMode.DISCRETE.name) }
         catch (_: Exception) { HomeLayoutMode.DISCRETE }
     }
 
@@ -519,11 +520,11 @@ fun ListsScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.padding(2.dp)
                                     ) {
-                                        val isGrid = homeLayoutMode == HomeLayoutMode.BENTO
+                                        val isGrid = categoryLayoutMode == HomeLayoutMode.BENTO
                                         Surface(
                                             onClick = {
-                                                homeLayoutMode = HomeLayoutMode.BENTO
-                                                uiPrefs.edit().putString("home_layout_mode", HomeLayoutMode.BENTO.name).apply()
+                                                categoryLayoutMode = HomeLayoutMode.BENTO
+                                                uiPrefs.edit().putString("category_layout_mode", HomeLayoutMode.BENTO.name).apply()
                                                 triggerAsmrTick(context)
                                             },
                                             shape = RoundedCornerShape(10.dp),
@@ -542,8 +543,8 @@ fun ListsScreen(
 
                                         Surface(
                                             onClick = {
-                                                homeLayoutMode = HomeLayoutMode.DISCRETE
-                                                uiPrefs.edit().putString("home_layout_mode", HomeLayoutMode.DISCRETE.name).apply()
+                                                categoryLayoutMode = HomeLayoutMode.DISCRETE
+                                                uiPrefs.edit().putString("category_layout_mode", HomeLayoutMode.DISCRETE.name).apply()
                                                 triggerAsmrTick(context)
                                             },
                                             shape = RoundedCornerShape(10.dp),
@@ -747,7 +748,7 @@ fun ListsScreen(
                                 color = MaterialTheme.colorScheme.outline
                             )
                         }
-                    } else if (homeLayoutMode == HomeLayoutMode.DISCRETE) {
+                    } else if (categoryLayoutMode == HomeLayoutMode.DISCRETE) {
                         // MODE 1: Discrete 1 Vertical Flat Minimal List (Stitch Screen #11)
                         LazyColumn(
                             state = listState,
@@ -926,14 +927,14 @@ fun ListsScreen(
                             modifier = Modifier.padding(3.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val isList = homeLayoutMode == HomeLayoutMode.DISCRETE
+                            val isList = categoryLayoutMode == HomeLayoutMode.DISCRETE
                             // List button
                             Surface(
                                 onClick = {
                                     if (!isList) {
                                         triggerAsmrTick(context)
-                                        homeLayoutMode = HomeLayoutMode.DISCRETE
-                                        uiPrefs.edit().putString("home_layout_mode", HomeLayoutMode.DISCRETE.name).apply()
+                                        categoryLayoutMode = HomeLayoutMode.DISCRETE
+                                        uiPrefs.edit().putString("category_layout_mode", HomeLayoutMode.DISCRETE.name).apply()
                                     }
                                 },
                                 shape = RoundedCornerShape(16.dp),
@@ -965,8 +966,8 @@ fun ListsScreen(
                                 onClick = {
                                     if (isList) {
                                         triggerAsmrTick(context)
-                                        homeLayoutMode = HomeLayoutMode.BENTO
-                                        uiPrefs.edit().putString("home_layout_mode", HomeLayoutMode.BENTO.name).apply()
+                                        categoryLayoutMode = HomeLayoutMode.BENTO
+                                        uiPrefs.edit().putString("category_layout_mode", HomeLayoutMode.BENTO.name).apply()
                                     }
                                 },
                                 shape = RoundedCornerShape(16.dp),

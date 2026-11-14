@@ -47,6 +47,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.common.api.ApiException
 import kotlinx.coroutines.launch
 import com.minimal.lists.data.model.HomeLayoutMode
+import com.minimal.lists.data.model.layoutPreferences
 import com.minimal.lists.data.repository.AppRepository
 import com.minimal.lists.data.storage.BackupSnapshot
 import com.minimal.lists.data.storage.OfflineStorageManager
@@ -73,12 +74,12 @@ fun SettingsScreen(
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
-    val uiPrefs = remember { context.getSharedPreferences("lists_ui_prefs", Context.MODE_PRIVATE) }
+    val uiPrefs = remember { layoutPreferences(context) }
     var homeLayoutMode by remember {
-        val saved = uiPrefs.getString("home_layout_mode", HomeLayoutMode.DISCRETE.name)
+        val saved = uiPrefs.getString("home_layout_mode", HomeLayoutMode.BENTO.name)
         mutableStateOf(
-            try { HomeLayoutMode.valueOf(saved ?: HomeLayoutMode.DISCRETE.name) }
-            catch (_: Exception) { HomeLayoutMode.DISCRETE }
+            try { HomeLayoutMode.valueOf(saved ?: HomeLayoutMode.BENTO.name) }
+            catch (_: Exception) { HomeLayoutMode.BENTO }
         )
     }
 

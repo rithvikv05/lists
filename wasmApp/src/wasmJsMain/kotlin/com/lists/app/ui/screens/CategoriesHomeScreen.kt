@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import com.lists.app.data.model.Category
 import com.lists.app.data.model.HomeLayoutMode
+import com.lists.app.data.model.layoutPreferences
 import com.lists.app.data.repository.AppRepository
 import com.lists.app.data.store.WebStore
 import com.lists.app.data.sync.DriveSyncManager
@@ -70,7 +71,7 @@ fun CategoriesHomeScreen(
     val isWideLayout = screenWidthDp >= 600
 
     val context = LocalContext.current
-    val uiPrefs = remember { context.getSharedPreferences("lists_ui_prefs", Context.MODE_PRIVATE) }
+    val uiPrefs = remember { layoutPreferences(context) }
     var homeLayoutMode by remember {
         val saved = uiPrefs.getString("home_layout_mode", HomeLayoutMode.BENTO.name)
         mutableStateOf(
@@ -298,6 +299,7 @@ fun CategoriesHomeScreen(
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceContainer,
+                        border = androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
                         modifier = Modifier.height(34.dp)
                     ) {
                         Row(
@@ -310,14 +312,14 @@ fun CategoriesHomeScreen(
                                     uiPrefs.edit().putString("home_layout_mode", HomeLayoutMode.BENTO.name).apply()
                                 },
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (isGridView) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                color = if (isGridView) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
                                 modifier = Modifier.size(30.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Default.GridView,
                                         contentDescription = "Grid View",
-                                        tint = if (isGridView) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = if (isGridView) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(17.dp)
                                     )
                                 }
@@ -329,14 +331,14 @@ fun CategoriesHomeScreen(
                                     uiPrefs.edit().putString("home_layout_mode", HomeLayoutMode.DISCRETE.name).apply()
                                 },
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (!isGridView) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                                color = if (!isGridView) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
                                 modifier = Modifier.size(30.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Default.ViewAgenda,
                                         contentDescription = "List View",
-                                        tint = if (!isGridView) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = if (!isGridView) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(17.dp)
                                     )
                                 }

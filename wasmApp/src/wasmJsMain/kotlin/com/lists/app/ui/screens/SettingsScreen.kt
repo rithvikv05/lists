@@ -45,6 +45,7 @@ import kotlinx.coroutines.launch
 import com.lists.app.currentTimeMillis
 import com.lists.app.data.model.Category
 import com.lists.app.data.model.HomeLayoutMode
+import com.lists.app.data.model.layoutPreferences
 import com.lists.app.data.model.RatingScaleOption
 import com.lists.app.data.repository.AppRepository
 import com.lists.app.data.store.WebStore
@@ -106,12 +107,12 @@ fun SettingsScreen(
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
-    val uiPrefs = remember { context.getSharedPreferences("lists_ui_prefs", Context.MODE_PRIVATE) }
+    val uiPrefs = remember { layoutPreferences(context) }
     var homeLayoutMode by remember {
-        val saved = uiPrefs.getString("home_layout_mode", HomeLayoutMode.DISCRETE.name)
+        val saved = uiPrefs.getString("home_layout_mode", HomeLayoutMode.BENTO.name)
         mutableStateOf(
-            try { HomeLayoutMode.valueOf(saved ?: HomeLayoutMode.DISCRETE.name) }
-            catch (_: Exception) { HomeLayoutMode.DISCRETE }
+            try { HomeLayoutMode.valueOf(saved ?: HomeLayoutMode.BENTO.name) }
+            catch (_: Exception) { HomeLayoutMode.BENTO }
         )
     }
 
