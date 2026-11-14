@@ -475,14 +475,20 @@ fun ListsScreen(
                                     Icon(
                                         imageVector = Icons.AutoMirrored.Filled.Sort,
                                         contentDescription = "Filter",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(17.dp)
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                     Text(
                                         text = sortOption.displayName,
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Icon(
+                                        imageVector = if (sortDescending) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+                                        contentDescription = if (sortDescending) "Descending" else "Ascending",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
                                     )
                                     Icon(
                                         imageVector = Icons.Default.KeyboardArrowDown,

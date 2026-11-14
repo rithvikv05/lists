@@ -540,8 +540,9 @@ fun ListDetailScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Filter", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
+                                    Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Filter", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                                     Text(sortOption.label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                                    Icon(if (sortDescending) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward, contentDescription = if (sortDescending) "Descending" else "Ascending", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                                     Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(18.dp))
                                 }
                             } else {
@@ -620,6 +621,10 @@ fun ListDetailScreen(
                                         .height(32.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         .clickable {
+                                            if (bookStatusFilter != filter) {
+                                                listState.requestScrollToItem(0)
+                                                gridState.requestScrollToItem(0)
+                                            }
                                             bookStatusFilter = filter
                                             triggerAsmrTick(context)
                                         }
@@ -648,6 +653,10 @@ fun ListDetailScreen(
                                         .height(32.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         .clickable {
+                                            if (statusFilter != filter) {
+                                                listState.requestScrollToItem(0)
+                                                gridState.requestScrollToItem(0)
+                                            }
                                             statusFilter = filter
                                             triggerAsmrTick(context)
                                         }
@@ -1117,7 +1126,8 @@ fun ListDetailScreen(
                     val isSelected = option == sortOption
                     Surface(
                         onClick = {
-
+                            listState.requestScrollToItem(0)
+                            gridState.requestScrollToItem(0)
                             if (sortOption == option) sortDescending = !sortDescending
                             else { sortOption = option; sortDescending = option != ItemSortOption.TITLE_ASC }
                             showSortSheet = false
