@@ -24,7 +24,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -34,12 +33,11 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Unarchive
-import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
@@ -88,6 +86,7 @@ fun ListsScreen(
     initialCategory: Category? = null,
     initialArchive: Boolean = false,
     onNavigateBack: (() -> Unit)? = null,
+    onNavigateToHome: (() -> Unit)? = null,
     onNavigateToListDetail: (Long) -> Unit,
     onNavigateToSettings: (() -> Unit)? = null,
     searchTrigger: Int = 0,
@@ -147,10 +146,6 @@ fun ListsScreen(
     var isRefreshing by remember { mutableStateOf(false) }
     val syncManager = remember { DriveSyncManager(context) }
     val signInHelper = remember { GoogleSignInHelper(context) }
-    val syncStatus by DriveSyncManager.syncStatus.collectAsState()
-    val currentAccount = remember(syncStatus) { signInHelper.getSignedInAccount() }
-    val isConnected = currentAccount != null
-    val isSynced = syncManager.lastSyncTimestamp > 0 || syncStatus is DriveSyncManager.SyncStatus.Success
 
     val onPullRefresh: () -> Unit = {
         isRefreshing = true
@@ -567,29 +562,11 @@ fun ListsScreen(
                             }
                         } else {
                             // MOBILE (!isWideLayout):
-                            // Left: Back button (if available) + Category Title with Arrow directly in header
+                            // Left: Category title and selector
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.weight(1f, fill = false)
                             ) {
-                                if (onNavigateBack != null) {
-                                    IconButton(
-                                        onClick = {
-                                            triggerStrongTick(context)
-                                            onNavigateBack.invoke()
-                                        },
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                            contentDescription = "Back",
-                                            tint = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(22.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                }
-
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
@@ -620,55 +597,11 @@ fun ListsScreen(
                                 }
                             }
 
-                            // Right: Sync, Search, Filter (Sort)
+                            // Right: Search, Filter, Home
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                // Cloud Sync Button
-                                IconButton(
-                                    onClick = {
-                                        val account = signInHelper.getSignedInAccount()
-                                        if (account != null) {
-                                            scope.launch {
-                                                triggerAsmrTick(context)
-                                                syncManager.syncNow(account, repository)
-                                            }
-                                        } else {
-                                            onNavigateToSettings?.invoke()
-                                        }
-                                    },
-                                    modifier = Modifier.size(40.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        if (syncStatus is DriveSyncManager.SyncStatus.Syncing) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(16.dp),
-                                                strokeWidth = 2.dp,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        } else {
-                                            Icon(
-                                                imageVector = if (isConnected) Icons.Default.Cloud else Icons.Outlined.Cloud,
-                                                contentDescription = "Sync",
-                                                tint = if (isConnected) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-                                                modifier = Modifier.size(22.dp)
-                                            )
-                                            if (isConnected && isSynced) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .align(Alignment.TopEnd)
-                                                        .offset(x = 2.dp, y = (-2).dp)
-                                                        .size(7.dp)
-                                                        .clip(CircleShape)
-                                                        .background(Color(0xFF00E676))
-                                                        .border(1.dp, MaterialTheme.colorScheme.surface, CircleShape)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
                                 // Search Button
                                 IconButton(
                                     onClick = {
@@ -685,7 +618,7 @@ fun ListsScreen(
                                         imageVector = Icons.Default.Search,
                                         contentDescription = "Search",
                                         tint = if (showSearchBar || searchQuery.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(22.dp)
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
 
@@ -701,6 +634,18 @@ fun ListsScreen(
                                         imageVector = Icons.AutoMirrored.Filled.Sort,
                                         contentDescription = "Filter",
                                         tint = if (sortOption != ListsSortOption.RECENT) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = { triggerStrongTick(context); onNavigateToHome?.invoke() ?: onNavigateBack?.invoke() },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Home,
+                                        contentDescription = "Home",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }

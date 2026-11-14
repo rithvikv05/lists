@@ -18,10 +18,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.outlined.Cloud
@@ -194,7 +192,7 @@ fun CategoriesHomeScreen(
                 .fillMaxSize()
                 .padding(horizontal = horizontalPadding)
         ) {
-            // Header with Lists title, sync, search, and settings
+            // Header with Lists title, sync, and settings
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -262,26 +260,6 @@ fun CategoriesHomeScreen(
                                     }
                                 }
                             }
-                        }
-
-                        // Search Button
-                        IconButton(
-                            onClick = {
-                                triggerAsmrTick(context)
-                                showSearchBar = !showSearchBar
-                                if (!showSearchBar) {
-                                    focusManager.clearFocus()
-                                    searchQuery = ""
-                                }
-                            },
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Search",
-                                tint = if (showSearchBar || searchQuery.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
-                            )
                         }
 
                         // Settings Button
@@ -385,12 +363,24 @@ fun CategoriesHomeScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = if (searchQuery.isNotBlank()) "No categories match \"$searchQuery\"" else "No lists yet\nTap New List below to get started",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                            textAlign = TextAlign.Center
-                        )
+                        if (!isWideLayout && archiveCount > 0 && searchQuery.isBlank()) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "No active lists",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    textAlign = TextAlign.Center
+                                )
+                                TextButton(onClick = onNavigateToArchive) { Text("View archive") }
+                            }
+                        } else {
+                            Text(
+                                text = if (searchQuery.isNotBlank()) "No categories match \"$searchQuery\"" else "No lists yet\nTap New List below to get started",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 } else if (isGridView) {
                     // 2-column on phone, Adaptive on tablet with matching card grey color & compact spacing
@@ -487,8 +477,7 @@ fun CategoriesHomeScreen(
         }
 
         // Bottom Action Row
-        // Mobile: Equal gap on left (squircle archive) & right (New List) matching cards (16dp)
-        // Tablet: Archive is in sidebar, New List aligned with cards' right margin (24dp)
+        // New List stays aligned with the right edge on all screen sizes.
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -498,43 +487,9 @@ fun CategoriesHomeScreen(
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = if (!isWideLayout) Arrangement.SpaceBetween else Arrangement.End,
+                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (!isWideLayout) {
-                    // Small Squircle Archive Icon Button on mobile (accent colour, matching + button)
-                    Surface(
-                        onClick = {
-                            triggerStrongTick(context)
-                            onNavigateToArchive()
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        shadowElevation = 0.dp,
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Archive,
-                                contentDescription = "Archive",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            if (archiveCount > 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(top = 7.dp, end = 7.dp)
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.onPrimaryContainer)
-                                )
-                            }
-                        }
-                    }
-                }
-
                 // New List Button - simple "+" in squircle box
                 Surface(
                     onClick = {

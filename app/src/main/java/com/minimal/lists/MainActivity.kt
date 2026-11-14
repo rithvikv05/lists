@@ -409,6 +409,11 @@ fun AppNavigation(
                     onNavigateBack = {
                         navController.popBackStack()
                     },
+                    onNavigateToHome = {
+                        if (!navController.popBackStack("home", false)) {
+                            navController.navigate("home") { launchSingleTop = true }
+                        }
+                    },
                     onNavigateToListDetail = { listId ->
                         searchTriggerDetail = 0
                         navController.navigate("listDetail/$listId")
@@ -428,6 +433,11 @@ fun AppNavigation(
                     initialArchive = false,
                     onNavigateBack = {
                         navController.popBackStack()
+                    },
+                    onNavigateToHome = {
+                        if (!navController.popBackStack("home", false)) {
+                            navController.navigate("home") { launchSingleTop = true }
+                        }
                     },
                     onNavigateToListDetail = { listId ->
                         searchTriggerDetail = 0
