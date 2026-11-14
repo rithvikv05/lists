@@ -455,46 +455,24 @@ fun ListsScreen(
                                 }
                             }
 
-                            // Right: Filter (Recents) dropdown and Grid/List slider only
+                            // Right: Filter and Grid/List slider
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                // Filter / Sort Dropdown
-                                Row(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable {
-                                            triggerAsmrTick(context)
-                                            showSortSheet = true
-                                        }
-                                        .padding(vertical = 4.dp, horizontal = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                // Filter / Sort Button
+                                IconButton(
+                                    onClick = {
+                                        triggerAsmrTick(context)
+                                        showSortSheet = true
+                                    },
+                                    modifier = Modifier.size(40.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.AutoMirrored.Filled.Sort,
                                         contentDescription = "Filter",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(20.dp)
-                                    )
-                                    Text(
-                                        text = sortOption.displayName,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Icon(
-                                        imageVector = if (sortDescending) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
-                                        contentDescription = if (sortDescending) "Descending" else "Ascending",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Icon(
-                                        imageVector = Icons.Default.KeyboardArrowDown,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.outline,
-                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
 

@@ -156,6 +156,9 @@ fun AppNavigation(
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    var listsArchiveSelected by remember(navBackStackEntry) {
+        mutableStateOf(navBackStackEntry?.arguments?.getBoolean("archive") == true)
+    }
     val configuration = LocalConfiguration.current
     val isTablet = configuration.smallestScreenWidthDp >= 600
     val wideLayout = isTablet
@@ -321,7 +324,7 @@ fun AppNavigation(
                 // Align Archive & Light/Dark mode button to the bottom of the sidebar
                 Spacer(modifier = Modifier.weight(1f))
 
-                val isArchiveSelected = currentRoute?.contains("archive=true") == true
+                val isArchiveSelected = currentRoute?.startsWith("lists") == true && listsArchiveSelected
                 NavigationRailItem(
                     selected = isArchiveSelected,
                     onClick = {
@@ -406,6 +409,7 @@ fun AppNavigation(
                     repository = repository,
                     initialCategory = initialCategory,
                     initialArchive = isArchive,
+                    onArchiveSelectionChange = { listsArchiveSelected = it },
                     onNavigateBack = {
                         navController.popBackStack()
                     },
@@ -431,6 +435,7 @@ fun AppNavigation(
                     repository = repository,
                     initialCategory = null,
                     initialArchive = false,
+                    onArchiveSelectionChange = { listsArchiveSelected = it },
                     onNavigateBack = {
                         navController.popBackStack()
                     },
