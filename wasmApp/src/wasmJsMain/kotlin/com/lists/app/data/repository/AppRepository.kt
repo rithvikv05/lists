@@ -8,6 +8,8 @@ import com.lists.app.data.db.UserList
 import com.lists.app.data.model.Category
 import com.lists.app.data.model.ItemStatus
 import com.lists.app.data.api.compactMetadataSnapshot
+import com.lists.app.data.api.GamePlaytime
+import com.lists.app.data.api.GamePlaytimeRepository
 import com.lists.app.data.model.SearchResult
 import com.lists.app.data.store.WebStore
 import kotlinx.coroutines.flow.Flow
@@ -247,6 +249,13 @@ class AppRepository(val context: Any? = null) {
         )
         WebStore.addItem(item)
         return newId
+    }
+
+    suspend fun saveGamePlaytime(itemId: Long, title: String, year: String, estimate: GamePlaytime) {
+        val current = getItemSync(itemId) ?: return
+        if (current.title != title || current.releaseYear != year || GamePlaytimeRepository.readSaved(current.metadataJson, title, year) != null) return
+        val metadata = GamePlaytimeRepository.withSaved(current.metadataJson, title, year, estimate)
+        if (GamePlaytimeRepository.readSaved(metadata, title, year) != null) WebStore.updateItem(current.copy(metadataJson = metadata))
     }
 
     suspend fun updateItem(item: ListItem) {

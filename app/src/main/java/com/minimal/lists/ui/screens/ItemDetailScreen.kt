@@ -64,6 +64,8 @@ import org.json.JSONObject
 import com.minimal.lists.data.api.EpisodeItem
 import com.minimal.lists.data.api.OttPlatform
 import com.minimal.lists.data.api.SearchRepository
+import com.minimal.lists.data.api.GamePlaytimeRepository
+import com.minimal.lists.data.api.PlaytimeResult
 import com.minimal.lists.data.db.ListItem
 import com.minimal.lists.data.model.Category
 import com.minimal.lists.data.model.RatingConverter
@@ -797,11 +799,17 @@ fun ItemCategoryBodySections(
             OverviewSection(currentItem.overview, title = "Synopsis")
         }
 
-        Category.GAME, Category.BOARD_GAME -> {
-            GameCompletionLogCard(
-                item = currentItem,
-                context = context
-            )
+        Category.GAME -> {
+            GamePlaytimeCard(currentItem, repository)
+            Spacer(modifier = Modifier.height(16.dp))
+            RatingCardSection(item = currentItem, repository = repository, scope = scope, context = context)
+            Spacer(modifier = Modifier.height(16.dp))
+            GameCompletionLogCard(item = currentItem, context = context)
+            OverviewSection(currentItem.overview, title = "Synopsis")
+        }
+
+        Category.BOARD_GAME -> {
+            GameCompletionLogCard(item = currentItem, context = context)
             Spacer(modifier = Modifier.height(16.dp))
             RatingCardSection(item = currentItem, repository = repository, scope = scope, context = context)
             OverviewSection(currentItem.overview, title = "Synopsis")
@@ -811,6 +819,65 @@ fun ItemCategoryBodySections(
             RatingCardSection(item = currentItem, repository = repository, scope = scope, context = context)
             OverviewSection(currentItem.overview)
         }
+    }
+}
+
+@Composable
+private fun GamePlaytimeCard(item: ListItem, repository: AppRepository) {
+    val context = LocalContext.current
+    val result by produceState<PlaytimeResult?>(initialValue = GamePlaytimeRepository.readSaved(item.metadataJson, item.title, item.releaseYear)?.let { PlaytimeResult.Available(it, cached = true) }, item.id, item.title, item.releaseYear, item.metadataJson) {
+        value = GamePlaytimeRepository.readSaved(item.metadataJson, item.title, item.releaseYear)?.let { PlaytimeResult.Available(it, cached = true) }
+        val result = GamePlaytimeRepository.lookup(context, item.title, item.releaseYear, item.metadataJson)
+        value = result
+        if (result is PlaytimeResult.Available) repository.saveGamePlaytime(item.id, item.title, item.releaseYear, result.times)
+    }
+    val available = result as? PlaytimeResult.Available
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Time to Beat", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface)
+            Spacer(modifier = Modifier.height(14.dp))
+            if (available != null) {
+                val times = available.times
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Main" to times.main, "Main + Sides" to times.extras, "Complete" to times.complete).forEach { (label, seconds) ->
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(if (seconds > 0) formatPlaytime(seconds) else "—", style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1, textAlign = TextAlign.Center)
+                        }
+                    }
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text(when (result) {
+                        null -> "Loading estimates…"
+                        PlaytimeResult.NotFound -> "No matching estimates found"
+                        else -> "Estimates temporarily unavailable"
+                    }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+private fun formatPlaytime(seconds: Int): String {
+    val minutes = (seconds / 60.0).roundToInt().coerceAtLeast(1)
+    val hours = minutes / 60
+    val remainder = minutes % 60
+    return when {
+        hours == 0 -> "${remainder}m"
+        remainder == 0 -> "${hours}h"
+        else -> "${hours}h ${remainder}m"
     }
 }
 

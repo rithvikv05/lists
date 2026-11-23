@@ -84,6 +84,9 @@ interface ItemDao {
     @Update
     suspend fun updateItem(item: ListItem)
 
+    @Query("UPDATE items SET metadataJson = :metadata, updatedAt = MAX(updatedAt, :updatedAt) WHERE id = :id AND metadataJson = :expectedMetadata AND title = :title AND releaseYear = :year")
+    suspend fun updateMetadataIfUnchanged(id: Long, title: String, year: String, expectedMetadata: String, metadata: String, updatedAt: Long): Int
+
     @Delete
     suspend fun deleteItem(item: ListItem)
 

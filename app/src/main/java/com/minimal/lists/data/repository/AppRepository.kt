@@ -16,6 +16,8 @@ import com.minimal.lists.data.db.UserList
 import com.minimal.lists.data.model.Category
 import com.minimal.lists.data.model.ItemStatus
 import com.minimal.lists.data.api.compactMetadataSnapshot
+import com.minimal.lists.data.api.GamePlaytime
+import com.minimal.lists.data.api.GamePlaytimeRepository
 import com.minimal.lists.data.model.SearchResult
 
 class AppRepository(private val context: Context) {
@@ -393,6 +395,20 @@ class AppRepository(private val context: Context) {
         itemDao.updateItem(item.copy(updatedAt = System.currentTimeMillis()))
         notifyDataChanged()
         triggerOfflineCoverDownload(item.uuid, item.coverUrl)
+    }
+
+    suspend fun saveGamePlaytime(itemId: Long, title: String, year: String, estimate: GamePlaytime) = withContext(Dispatchers.IO) {
+        repeat(3) {
+            val current = itemDao.getItemByIdSync(itemId) ?: return@withContext
+            if (current.title != title || current.releaseYear != year) return@withContext
+            if (GamePlaytimeRepository.readSaved(current.metadataJson, title, year) != null) return@withContext
+            val metadata = GamePlaytimeRepository.withSaved(current.metadataJson, title, year, estimate)
+            if (GamePlaytimeRepository.readSaved(metadata, title, year) == null) return@withContext
+            if (itemDao.updateMetadataIfUnchanged(itemId, title, year, current.metadataJson, metadata, System.currentTimeMillis()) > 0) {
+                notifyDataChanged()
+                return@withContext
+            }
+        }
     }
 
     suspend fun toggleItemMarked(item: ListItem) = withContext(Dispatchers.IO) {
@@ -1045,7 +1061,10 @@ class AppRepository(private val context: Context) {
                                 totalPages = remoteObj.optInt("totalPages", localItem.totalPages),
                                 gamePlatform = remoteObj.optString("gamePlatform", localItem.gamePlatform),
                                 metadataId = remoteObj.optString("metadataId", localItem.metadataId),
-                                metadataJson = compactMetadataSnapshot(remoteObj.optString("metadataJson", localItem.metadataJson)),
+                                metadataJson = GamePlaytimeRepository.mergeSaved(
+                                    remoteObj.optString("metadataJson", localItem.metadataJson), localItem.metadataJson,
+                                    remoteObj.optString("title", localItem.title), remoteObj.optString("releaseYear", localItem.releaseYear)
+                                ),
                                 isbn = remoteObj.optString("isbn", localItem.isbn),
                                 publisher = remoteObj.optString("publisher", localItem.publisher),
                                 bookLanguage = remoteObj.optString("bookLanguage", localItem.bookLanguage),
@@ -1057,6 +1076,15 @@ class AppRepository(private val context: Context) {
                                 updatedAt = remoteUpdated
                             )
                         )
+                    } else {
+                        // Retain estimates from an older remote copy without overwriting newer local edits.
+                        val combined = GamePlaytimeRepository.mergeSaved(
+                            localItem.metadataJson, remoteObj.optString("metadataJson", ""), localItem.title, localItem.releaseYear
+                        )
+                        if (combined != localItem.metadataJson && GamePlaytimeRepository.readSaved(combined, localItem.title, localItem.releaseYear) != null) {
+                            itemDao.updateMetadataIfUnchanged(localItem.id, localItem.title, localItem.releaseYear,
+                                localItem.metadataJson, combined, localItem.updatedAt)
+                        }
                     }
                 }
             }

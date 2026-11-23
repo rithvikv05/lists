@@ -1,6 +1,7 @@
 package com.lists.app.data.store
 
 import com.lists.app.data.api.compactMetadataSnapshot
+import com.lists.app.data.api.GamePlaytimeRepository
 import com.lists.app.currentTimeMillis
 import com.lists.app.data.model.*
 import kotlinx.browser.localStorage
@@ -527,7 +528,11 @@ object WebStore {
                 mergedItemsMap[ri.uuid] = remapped
             } else {
                 if (ri.updatedAt > existing.updatedAt) {
-                    mergedItemsMap[ri.uuid] = remapped.copy(id = existing.id)
+                    mergedItemsMap[ri.uuid] = remapped.copy(id = existing.id, metadataJson = GamePlaytimeRepository.mergeSaved(
+                        remapped.metadataJson, existing.metadataJson, remapped.title, remapped.releaseYear))
+                } else {
+                    mergedItemsMap[ri.uuid] = existing.copy(metadataJson = GamePlaytimeRepository.mergeSaved(
+                        existing.metadataJson, remapped.metadataJson, existing.title, existing.releaseYear))
                 }
             }
         }

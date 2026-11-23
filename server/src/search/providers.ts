@@ -28,6 +28,7 @@ export interface EngineEnv {
   HARDCOVER_API_TOKEN?: string; COMIC_VINE_API_KEY?: string; BGG_API_TOKEN?: string;
   TWITCH_CLIENT_ID?: string; TWITCH_CLIENT_SECRET?: string; IGDB_CLIENT_ID?: string; IGDB_CLIENT_SECRET?: string;
   GOOGLE_BOOKS_API_KEY?: string; ISBNDB_API_KEY?: string;
+  APISH_API_KEY?: string;
   ENABLE_ANILIST?: string; ENVIRONMENT?: string;
 }
 export interface SearchOptions { query: string; category: Category; author?: string; year?: string; yearStart?: number; yearEnd?: number; lang?: string; country?: string; mode: 'ALL' | 'TITLE' | 'AUTHOR'; includeExtras?: boolean; backup?: boolean }

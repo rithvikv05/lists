@@ -12,6 +12,7 @@ import { EngineEnv, fallbackPlan, providerPlan, SearchOptions } from './search/p
 import { resolveUrl, supportedUrl } from './resolve/resolver';
 import { providerFetch, runProvider } from './providers/http';
 import { allowedImageUrl, fetchCover } from './images';
+import { gamePlaytime } from './providers/games/playtime';
 
 const app = new Hono<{ Bindings: EngineEnv }>();
 app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'], maxAge: 86400 }));
@@ -30,7 +31,7 @@ app.get('/v2/cover', async c => {
   return response;
 });
 const envKeys: (keyof Omit<EngineEnv, 'CATALOG_DB'>)[] = ['TMDB_API_KEY', 'TMDB_READ_ACCESS_TOKEN', 'OMDB_API_KEY', 'HARDCOVER_API_TOKEN',
-  'COMIC_VINE_API_KEY', 'BGG_API_TOKEN', 'GOOGLE_BOOKS_API_KEY', 'ISBNDB_API_KEY', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET', 'IGDB_CLIENT_ID', 'IGDB_CLIENT_SECRET', 'ENABLE_ANILIST', 'ENVIRONMENT'];
+  'COMIC_VINE_API_KEY', 'BGG_API_TOKEN', 'GOOGLE_BOOKS_API_KEY', 'ISBNDB_API_KEY', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET', 'IGDB_CLIENT_ID', 'IGDB_CLIENT_SECRET', 'APISH_API_KEY', 'ENABLE_ANILIST', 'ENVIRONMENT'];
 function environment(bindings: EngineEnv = {}): EngineEnv {
   const result = { ...bindings };
   const local = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
@@ -44,6 +45,34 @@ app.get('/health', c => {
   const fallbackProviders = Object.fromEntries(categories.map(category => [category,
     fallbackPlan({ query: '', category, mode: 'ALL' }).map(p => p.source)]));
   return c.json({ status: 'ok', engine: 'lists-search-engine', version: '3.1.0', catalogConfigured: !!env.CATALOG_DB, providers, fallbackProviders, time: new Date().toISOString() });
+});
+
+app.get('/v2/games/playtime', async c => {
+  const title = (c.req.query('title') || '').trim();
+  const year = c.req.query('year') || '';
+  const id = c.req.query('igdbId') || '';
+  const refresh = c.req.query('refresh') || '';
+  if (!title || title.length > 200 || (year && !/^(18|19|20)\d{2}$/.test(year)) || (id && !/^\d{1,12}$/.test(id)) || (refresh && refresh !== '1')) {
+    return c.json({ error: 'Valid title, year and IGDB ID are required' }, 400);
+  }
+  const cache = typeof caches !== 'undefined' ? caches.default : undefined;
+  const cacheUrl = new URL(c.req.url);
+  cacheUrl.searchParams.delete('refresh');
+  cacheUrl.searchParams.set('_playtime_cache', '2');
+  const cacheKey = new Request(cacheUrl);
+  const cached = await cache?.match(cacheKey);
+  if (cached) {
+    // A refresh retries an IGDB fallback without spending another credit on an already cached HLTB result.
+    const body = refresh ? await cached.clone().json() as { status?: string; estimate?: { source?: string } } : null;
+    if (!refresh || body?.estimate?.source === 'howlongtobeat') return cached;
+  }
+  const env = environment(c.env);
+  const result = await gamePlaytime(title, year, id, env.TWITCH_CLIENT_ID || env.IGDB_CLIENT_ID, env.TWITCH_CLIENT_SECRET || env.IGDB_CLIENT_SECRET, env.APISH_API_KEY);
+  if (result.status === 'unavailable') return c.json(result, 503);
+  const response = c.json(result);
+  response.headers.set('Cache-Control', result.status === 'available' && result.estimate.source === 'howlongtobeat' ? 'public, max-age=86400' : 'public, max-age=3600');
+  if (cache) c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
 });
 
 app.on('GET', ['/v1/search', '/v2/search'], async c => {

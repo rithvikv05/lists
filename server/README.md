@@ -2,6 +2,10 @@
 
 One Cloudflare Worker serves media search, rich book search, ISBN lookup, link resolution, reading-speed calculations. The former `books/cloudflare-engine` entry imports this same implementation; it is a compatibility deployment, not a second engine.
 
+`GET /v2/games/playtime?title=Hades&year=2020&igdbId=113112` fetches optional game completion estimates on demand. The response names the source and provides seconds for the main game, main plus extras, and completion. HowLongToBeat is attempted first; when it is unavailable or has no safe match, IGDB is used if configured. The two sources have independent community estimates, so callers must show the returned attribution. Missing individual durations are `null`; provider failures return HTTP 503. HowLongToBeat responses are cached at the edge for one day and IGDB results for one hour. The optional IGDB ID should come from the selected game's verified source references; without it the server requires a unique exact title and compatible year.
+
+An optional [API.SH HowLongToBeat provider](https://api.sh/docs/howlongtobeat-search) can be enabled by setting the Worker secret `APISH_API_KEY` with `npx wrangler secret put APISH_API_KEY`. It is tried first when configured; the existing sources remain fallbacks. API.SH advertises a monthly free allowance, but usage is subject to its current pricing and limits: configure a key cap or spend limit on that account before enabling it. The public endpoint and the Android app never receive the key. Edge and device caching reduce requests; cache entries from before the secret was added may remain until their existing expiry.
+
 ## Development and validation
 
 ```sh

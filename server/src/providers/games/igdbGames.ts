@@ -4,7 +4,7 @@ import { SearchResult } from '../../types';
 
 let cachedTwitchToken: { clientId: string; token: string; expiresAt: number } | null = null;
 
-async function getTwitchToken(clientId: string, clientSecret: string): Promise<string | null> {
+export async function getTwitchToken(clientId: string, clientSecret: string): Promise<string | null> {
   if (cachedTwitchToken && cachedTwitchToken.clientId === clientId && Date.now() < cachedTwitchToken.expiresAt - 60000) {
     return cachedTwitchToken.token;
   }

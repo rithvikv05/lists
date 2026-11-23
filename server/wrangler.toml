@@ -13,6 +13,7 @@ ENVIRONMENT = "production"
 #   npx wrangler secret put COMIC_VINE_API_KEY
 #   npx wrangler secret put TWITCH_CLIENT_ID
 #   npx wrangler secret put TWITCH_CLIENT_SECRET
+#   npx wrangler secret put APISH_API_KEY
 #
 # For local dev, keys are loaded automatically from .dev.vars (which is git-ignored).
 
