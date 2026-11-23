@@ -8,6 +8,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.security.MessageDigest
+import java.text.Normalizer
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 data class GamePlaytime(
@@ -33,11 +35,10 @@ object GamePlaytimeRepository {
         if (title.isBlank()) return@withContext PlaytimeResult.NotFound
         readSaved(metadata, title, year)?.let { return@withContext PlaytimeResult.Available(it, cached = true) }
         val igdbId = extractIgdbId(metadata)
-        val key = MessageDigest.getInstance("SHA-256").digest("$title|$year|$igdbId".toByteArray())
-            .joinToString("") { "%02x".format(it) }
+        val key = cacheKey(title, year, igdbId)
         val prefs = context.applicationContext.getSharedPreferences("game_playtime_cache_v2", Context.MODE_PRIVATE)
         val cached = try { JSONObject(prefs.getString(key, "") ?: "") } catch (_: Exception) { null }
-        val old = cached?.let(::parseEstimate)
+        val old = cached?.let(::parseEstimate) ?: readCached(context, title, year, metadata)
         if (old != null) {
             return@withContext PlaytimeResult.Available(old, cached = true)
         }
@@ -69,6 +70,33 @@ object GamePlaytimeRepository {
         } catch (_: Exception) {
             old?.let { PlaytimeResult.Available(it, cached = true) } ?: PlaytimeResult.Unavailable
         }
+    }
+
+    private fun digest(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
+        .joinToString("") { "%02x".format(it) }
+
+    private fun cacheKey(title: String, year: String, igdbId: String) = digest("$title|$year|$igdbId")
+
+    /** Promote entries from older app versions without another network request. */
+    fun readCached(context: Context, title: String, year: String, metadata: String): GamePlaytime? {
+        val prefs = context.applicationContext.getSharedPreferences("game_playtime_cache_v2", Context.MODE_PRIVATE)
+        val key = cacheKey(title, year, extractIgdbId(metadata))
+        try { JSONObject(prefs.getString(key, "") ?: "").let(::parseEstimate)?.let { return it } } catch (_: Exception) {}
+        val normalized = Normalizer.normalize(title, Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+            .lowercase(Locale.ROOT).replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim().replace(Regex("\\s+"), " ")
+        val legacy = context.applicationContext.getSharedPreferences("game_playtime_cache", Context.MODE_PRIVATE)
+        val raw = legacy.getString(digest("$normalized|$year"), "") ?: ""
+        return readLegacyCached(raw)
+    }
+
+    internal fun readLegacyCached(raw: String): GamePlaytime? {
+        val old = try { JSONObject(raw) } catch (_: Exception) { return null }
+        val id = old.optLong("id")
+        if (id <= 0) return null
+        val estimate = GamePlaytime("howlongtobeat", "https://howlongtobeat.com/game/$id",
+            old.optInt("main").coerceIn(0, 99_999_999), old.optInt("extras").coerceIn(0, 99_999_999),
+            old.optInt("complete").coerceIn(0, 99_999_999))
+        return estimate.takeIf { it.main > 0 || it.extras > 0 || it.complete > 0 }
     }
 
     fun readSaved(metadata: String, title: String, year: String): GamePlaytime? {

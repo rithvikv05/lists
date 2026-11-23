@@ -251,11 +251,14 @@ class AppRepository(val context: Any? = null) {
         return newId
     }
 
-    suspend fun saveGamePlaytime(itemId: Long, title: String, year: String, estimate: GamePlaytime) {
-        val current = getItemSync(itemId) ?: return
-        if (current.title != title || current.releaseYear != year || GamePlaytimeRepository.readSaved(current.metadataJson, title, year) != null) return
+    suspend fun saveGamePlaytime(itemId: Long, title: String, year: String, estimate: GamePlaytime): Boolean {
+        val current = getItemSync(itemId) ?: return false
+        if (current.title != title || current.releaseYear != year) return false
+        if (GamePlaytimeRepository.readSaved(current.metadataJson, title, year) != null) return true
         val metadata = GamePlaytimeRepository.withSaved(current.metadataJson, title, year, estimate)
-        if (GamePlaytimeRepository.readSaved(metadata, title, year) != null) WebStore.updateItem(current.copy(metadataJson = metadata))
+        if (GamePlaytimeRepository.readSaved(metadata, title, year) == null) return false
+        WebStore.updateItem(current.copy(metadataJson = metadata))
+        return true
     }
 
     suspend fun updateItem(item: ListItem) {

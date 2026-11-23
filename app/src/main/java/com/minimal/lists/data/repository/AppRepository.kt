@@ -397,18 +397,20 @@ class AppRepository(private val context: Context) {
         triggerOfflineCoverDownload(item.uuid, item.coverUrl)
     }
 
-    suspend fun saveGamePlaytime(itemId: Long, title: String, year: String, estimate: GamePlaytime) = withContext(Dispatchers.IO) {
+    suspend fun saveGamePlaytime(itemId: Long, title: String, year: String, estimate: GamePlaytime, notify: Boolean = true): Boolean = withContext(Dispatchers.IO) {
         repeat(3) {
-            val current = itemDao.getItemByIdSync(itemId) ?: return@withContext
-            if (current.title != title || current.releaseYear != year) return@withContext
-            if (GamePlaytimeRepository.readSaved(current.metadataJson, title, year) != null) return@withContext
+            val current = itemDao.getItemByIdSync(itemId) ?: return@withContext false
+            if (current.title != title || current.releaseYear != year) return@withContext false
+            if (GamePlaytimeRepository.readSaved(current.metadataJson, title, year) != null) return@withContext true
             val metadata = GamePlaytimeRepository.withSaved(current.metadataJson, title, year, estimate)
-            if (GamePlaytimeRepository.readSaved(metadata, title, year) == null) return@withContext
-            if (itemDao.updateMetadataIfUnchanged(itemId, title, year, current.metadataJson, metadata, System.currentTimeMillis()) > 0) {
-                notifyDataChanged()
-                return@withContext
+            if (GamePlaytimeRepository.readSaved(metadata, title, year) == null) return@withContext false
+            // Metadata enrichment must not make an older personal edit win a sync conflict.
+            if (itemDao.updateMetadataIfUnchanged(itemId, title, year, current.metadataJson, metadata, current.updatedAt) > 0) {
+                if (notify) notifyDataChanged()
+                return@withContext true
             }
         }
+        false
     }
 
     suspend fun toggleItemMarked(item: ListItem) = withContext(Dispatchers.IO) {
@@ -556,7 +558,14 @@ class AppRepository(private val context: Context) {
     // Export full database to JSON string (v2 schema with UUIDs and all fields)
     suspend fun exportDataToJson(): String = withContext(Dispatchers.IO) {
         val lists = listDao.getAllListsSync()
-        val items = itemDao.getAllItemsSync()
+        var items = itemDao.getAllItemsSync()
+        var promoted = false
+        for (item in items) {
+            if (item.category != Category.GAME.id || GamePlaytimeRepository.readSaved(item.metadataJson, item.title, item.releaseYear) != null) continue
+            val cached = GamePlaytimeRepository.readCached(context, item.title, item.releaseYear, item.metadataJson) ?: continue
+            if (saveGamePlaytime(item.id, item.title, item.releaseYear, cached, notify = false)) promoted = true
+        }
+        if (promoted) items = itemDao.getAllItemsSync()
 
         val root = JSONObject()
         root.put("schemaVersion", 2)
@@ -776,6 +785,11 @@ class AppRepository(private val context: Context) {
             val remote = JSONObject(remoteJsonStr)
             val remoteLists = remote.optJSONArray("lists") ?: JSONArray()
             val remoteItems = remote.optJSONArray("items") ?: JSONArray()
+            // Keep a reference to old cached estimates before a newer remote snapshot can change source IDs.
+            val pendingEstimates = itemDao.getAllItemsSync().mapNotNull { item ->
+                if (item.category != Category.GAME.id || GamePlaytimeRepository.readSaved(item.metadataJson, item.title, item.releaseYear) != null) null
+                else GamePlaytimeRepository.readCached(context, item.title, item.releaseYear, item.metadataJson)?.let { item to it }
+            }
 
             // 1. Process and merge tombstones (deletions)
             val remoteDeletedLists = mutableMapOf<String, Long>()
@@ -1103,6 +1117,9 @@ class AppRepository(private val context: Context) {
                     }
                     editor.apply()
                 }
+            }
+            for ((item, estimate) in pendingEstimates) {
+                saveGamePlaytime(item.id, item.title, item.releaseYear, estimate, notify = false)
             }
             // 8. Prune any orphaned cover files that no longer belong to active items
             pruneOrphanedCovers()

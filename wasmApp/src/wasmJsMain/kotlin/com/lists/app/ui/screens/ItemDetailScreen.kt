@@ -802,8 +802,9 @@ private fun GamePlaytimeCard(item: ListItem, repository: AppRepository) {
     val result by produceState<PlaytimeResult?>(initialValue = GamePlaytimeRepository.readSaved(item.metadataJson, item.title, item.releaseYear)?.let { PlaytimeResult.Available(it) }, item.id, item.title, item.releaseYear, item.metadataJson) {
         value = GamePlaytimeRepository.readSaved(item.metadataJson, item.title, item.releaseYear)?.let { PlaytimeResult.Available(it) }
         val result = GamePlaytimeRepository.lookup(item.title, item.releaseYear, item.metadataJson)
-        value = result
-        if (result is PlaytimeResult.Available) repository.saveGamePlaytime(item.id, item.title, item.releaseYear, result.times)
+        value = if (result is PlaytimeResult.Available && !repository.saveGamePlaytime(item.id, item.title, item.releaseYear, result.times)) {
+            PlaytimeResult.Unavailable
+        } else result
     }
     val available = result as? PlaytimeResult.Available
 

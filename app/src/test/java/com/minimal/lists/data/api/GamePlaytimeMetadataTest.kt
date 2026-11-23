@@ -35,4 +35,13 @@ class GamePlaytimeMetadataTest {
         assertTrue(saved.toByteArray().size <= 2048)
         assertEquals(time, GamePlaytimeRepository.readSaved(saved, "A Game", "2020"))
     }
+
+    @Test fun previousCacheFormatCanBePromotedIntoBackupMetadata() {
+        val old = """{"id":42,"main":3600,"extras":7200,"complete":10800,"savedAt":1}"""
+        val cached = GamePlaytimeRepository.readLegacyCached(old)
+        assertEquals(time, cached)
+        val metadata = GamePlaytimeRepository.withSaved("{}", "A Game", "2020", cached!!)
+        assertEquals(time, GamePlaytimeRepository.readSaved(compactMetadataSnapshot(metadata), "A Game", "2020"))
+        assertNull(GamePlaytimeRepository.readLegacyCached("""{"id":0,"main":3600}"""))
+    }
 }
