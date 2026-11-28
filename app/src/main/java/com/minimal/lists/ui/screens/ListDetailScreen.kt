@@ -153,6 +153,12 @@ fun ListDetailScreen(
 
     var sortOption by remember { mutableStateOf(ItemSortOption.DATE_ADDED_DESC) }
     var sortDescending by remember { mutableStateOf(true) }
+    val manualSort = list?.sortingOption == "MANUAL"
+    LaunchedEffect(listId, list?.sortingOption) {
+        list?.sortingOption?.let { saved ->
+            ItemSortOption.entries.firstOrNull { it.name == saved }?.let { sortOption = it }
+        }
+    }
 
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -764,6 +770,15 @@ fun ListDetailScreen(
                             }
                         }
                     }
+                } else if (manualSort) {
+                    ManualItemLayout(
+                        listId = listId, allItems = rawItems, visibleItems = filteredItems,
+                        grid = displayMode == ViewDisplayMode.GRID, columns = gridColumns,
+                        category = category, scale = activeScale,
+                        onOpen = onNavigateToItemDetail,
+                        onToggle = { item -> scope.launch { repository.toggleItemMarked(item) } },
+                        onSaveOrder = { ids -> scope.launch { repository.saveManualItemOrder(listId, ids) } }
+                    )
                 } else if (displayMode == ViewDisplayMode.GRID) {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(gridColumns),
@@ -1103,13 +1118,16 @@ fun ListDetailScreen(
                 )
 
                 ItemSortOption.entries.forEach { option ->
-                    val isSelected = option == sortOption
+                    val isSelected = !manualSort && option == sortOption
                     Surface(
                         onClick = {
                             listState.requestScrollToItem(0)
                             gridState.requestScrollToItem(0)
                             if (sortOption == option) sortDescending = !sortDescending
                             else { sortOption = option; sortDescending = option != ItemSortOption.TITLE_ASC }
+                            if (manualSort) scope.launch {
+                                repository.setManualItemSort(listId, false, emptyList(), sortOption.name)
+                            }
                             showSortSheet = false
                             triggerAsmrTick(context)
                         },
@@ -1137,6 +1155,23 @@ fun ListDetailScreen(
                             )
                         }
                     }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Manual sort", style = MaterialTheme.typography.bodyLarge)
+                        Text("Long-press and drag items to rearrange", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = manualSort, onCheckedChange = { enabled ->
+                        val existing = rawItems.any { it.customOrder > 0 }
+                        val ids = if (existing) rawItems.sortedWith(compareBy<ListItem> {
+                            if (it.customOrder > 0) it.customOrder else Int.MAX_VALUE
+                        }.thenByDescending { it.createdAt }).map { it.id }
+                        else (sortedPinned + sortedRemaining + sortedCompleted + rawItems).distinctBy { it.id }.map { it.id }
+                        selectedItemIds = emptySet()
+                        scope.launch { repository.setManualItemSort(listId, enabled, ids, sortOption.name) }
+                    })
                 }
             }
         }

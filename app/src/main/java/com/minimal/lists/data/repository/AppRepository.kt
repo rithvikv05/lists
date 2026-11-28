@@ -1,11 +1,14 @@
 package com.minimal.lists.data.repository
 
 import android.content.Context
+import androidx.room.withTransaction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import com.minimal.lists.data.api.SearchRepository
@@ -21,6 +24,23 @@ import com.minimal.lists.data.api.GamePlaytimeRepository
 import com.minimal.lists.data.model.SearchResult
 
 class AppRepository(private val context: Context) {
+    private val manualOrderMutex = Mutex()
+    suspend fun setManualItemSort(listId: Long, enabled: Boolean, order: List<Long>, automaticSort: String) = manualOrderMutex.withLock { withContext(Dispatchers.IO) {
+        db.withTransaction {
+            val now = System.currentTimeMillis()
+            if (enabled) order.distinct().forEachIndexed { index, id -> itemDao.setOrder(listId, id, index + 1, now) }
+            listDao.setSortingOption(listId, if (enabled) "MANUAL" else automaticSort, now)
+        }
+        notifyDataChanged()
+    } }
+
+    suspend fun saveManualItemOrder(listId: Long, order: List<Long>) = manualOrderMutex.withLock { withContext(Dispatchers.IO) {
+        db.withTransaction {
+            val now = System.currentTimeMillis()
+            order.distinct().forEachIndexed { index, id -> itemDao.setOrder(listId, id, index + 1, now) }
+        }
+        notifyDataChanged()
+    } }
     private val db = AppDatabase.getInstance(context)
     private val listDao = db.listDao()
     private val itemDao = db.itemDao()

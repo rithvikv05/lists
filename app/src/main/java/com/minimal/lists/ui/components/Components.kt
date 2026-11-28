@@ -1495,7 +1495,7 @@ fun GridMediaCard(
     selected: Boolean = false,
     selectionMode: Boolean = false,
     onClick: () -> Unit,
-    onLongClick: () -> Unit = {},
+    onLongClick: (() -> Unit)? = null,
     onToggleComplete: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -1682,7 +1682,7 @@ fun ListMediaRow(
     selected: Boolean = false,
     selectionMode: Boolean = false,
     onClick: () -> Unit,
-    onLongClick: () -> Unit = {},
+    onLongClick: (() -> Unit)? = null,
     onToggleComplete: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {

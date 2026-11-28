@@ -57,6 +57,7 @@ android {
 }
 
 dependencies {
+    implementation("sh.calvin.reorderable:reorderable:2.4.3")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")

@@ -11,6 +11,8 @@ data class ListWithStats(
 
 @Dao
 interface ListDao {
+    @Query("UPDATE lists SET sortingOption = :option, updatedAt = :now WHERE id = :id")
+    suspend fun setSortingOption(id: Long, option: String, now: Long)
     @Query("""
         SELECT 
             lists.*,
@@ -57,6 +59,8 @@ interface ListDao {
 
 @Dao
 interface ItemDao {
+    @Query("UPDATE items SET customOrder = :position, updatedAt = :now WHERE id = :id AND listId = :listId")
+    suspend fun setOrder(listId: Long, id: Long, position: Int, now: Long)
     @Query("SELECT * FROM items WHERE listId = :listId ORDER BY pinned DESC, id DESC")
     fun getItemsForList(listId: Long): Flow<List<ListItem>>
 
