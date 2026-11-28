@@ -417,6 +417,21 @@ class AppRepository(private val context: Context) {
         triggerOfflineCoverDownload(item.uuid, item.coverUrl)
     }
 
+    suspend fun saveGameCompletion(itemId: Long, minutes: List<Int>): Boolean = withContext(Dispatchers.IO) {
+        repeat(3) {
+            val current = itemDao.getItemByIdSync(itemId) ?: return@withContext false
+            val root = try { JSONObject(compactMetadataSnapshot(current.metadataJson)) } catch (_: Exception) { JSONObject() }
+            root.put("gameCompletionLog", JSONArray(minutes.map { it.coerceIn(0, 599999) }))
+            val metadata = compactMetadataSnapshot(root.toString())
+            if (!JSONObject(metadata).has("gameCompletionLog")) return@withContext false
+            if (itemDao.updateMetadataIfUnchanged(itemId, current.title, current.releaseYear, current.metadataJson, metadata, System.currentTimeMillis()) > 0) {
+                notifyDataChanged()
+                return@withContext true
+            }
+        }
+        false
+    }
+
     suspend fun saveGamePlaytime(itemId: Long, title: String, year: String, estimate: GamePlaytime, notify: Boolean = true): Boolean = withContext(Dispatchers.IO) {
         repeat(3) {
             val current = itemDao.getItemByIdSync(itemId) ?: return@withContext false
@@ -1115,7 +1130,7 @@ class AppRepository(private val context: Context) {
                         val combined = GamePlaytimeRepository.mergeSaved(
                             localItem.metadataJson, remoteObj.optString("metadataJson", ""), localItem.title, localItem.releaseYear
                         )
-                        if (combined != localItem.metadataJson && GamePlaytimeRepository.readSaved(combined, localItem.title, localItem.releaseYear) != null) {
+                        if (combined != localItem.metadataJson) {
                             itemDao.updateMetadataIfUnchanged(localItem.id, localItem.title, localItem.releaseYear,
                                 localItem.metadataJson, combined, localItem.updatedAt)
                         }

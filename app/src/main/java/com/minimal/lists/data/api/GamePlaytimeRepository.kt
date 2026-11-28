@@ -115,7 +115,13 @@ object GamePlaytimeRepository {
     }
 
     fun mergeSaved(incoming: String, local: String, title: String, year: String): String {
-        val compact = compactMetadataSnapshot(incoming)
+        var compact = compactMetadataSnapshot(incoming)
+        val incomingRoot = try { JSONObject(compact) } catch (_: Exception) { JSONObject() }
+        val localLog = try { JSONObject(local).optJSONArray("gameCompletionLog") } catch (_: Exception) { null }
+        if (!incomingRoot.has("gameCompletionLog") && localLog != null) {
+            incomingRoot.put("gameCompletionLog", localLog)
+            compact = compactMetadataSnapshot(incomingRoot.toString())
+        }
         if (readSaved(compact, title, year) != null) return compact
         val saved = readSaved(local, title, year) ?: return compact
         return withSaved(compact, title, year, saved)

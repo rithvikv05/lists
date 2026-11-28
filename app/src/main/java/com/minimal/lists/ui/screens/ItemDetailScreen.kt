@@ -74,6 +74,8 @@ import com.minimal.lists.data.model.Category
 import com.minimal.lists.data.model.RatingConverter
 import com.minimal.lists.data.reminder.EpisodeReminderManager
 import com.minimal.lists.data.repository.AppRepository
+import com.minimal.lists.ui.components.GameCompletionCard
+import com.minimal.lists.ui.components.GamePlatformsCard
 import com.minimal.lists.ui.components.CoverImage
 import com.minimal.lists.ui.components.triggerAsmrTick
 import com.minimal.lists.ui.components.triggerStrongTick
@@ -807,7 +809,9 @@ fun ItemCategoryBodySections(
             Spacer(modifier = Modifier.height(16.dp))
             RatingCardSection(item = currentItem, repository = repository, scope = scope, context = context)
             Spacer(modifier = Modifier.height(16.dp))
-            GameCompletionLogCard(item = currentItem, context = context)
+            GameCompletionCard(item = currentItem, repository = repository)
+            Spacer(modifier = Modifier.height(16.dp))
+            GamePlatformsCard(currentItem)
             OverviewSection(currentItem.overview, title = "Synopsis")
         }
 

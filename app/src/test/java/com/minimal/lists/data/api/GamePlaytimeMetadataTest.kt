@@ -5,6 +5,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GamePlaytimeMetadataTest {
+    @Test fun completionMinutesSurviveBackupAndMissingRemoteMetadata() {
+        val stored = """{"gameCompletionLog":[123,456,789]}"""
+        val restored = compactMetadataSnapshot(stored)
+        assertEquals(456, JSONObject(restored).getJSONArray("gameCompletionLog").getInt(1))
+        val merged = GamePlaytimeRepository.mergeSaved("{}", stored, "Game", "2020")
+        assertEquals(789, JSONObject(merged).getJSONArray("gameCompletionLog").getInt(2))
+        val removed = GamePlaytimeRepository.mergeSaved("""{"gameCompletionLog":[0,0,0]}""", stored, "Game", "2020")
+        assertEquals(0, JSONObject(removed).getJSONArray("gameCompletionLog").getInt(0))
+    }
     private val time = GamePlaytime("howlongtobeat", "https://howlongtobeat.com/game/42", 3600, 7200, 10800)
 
     @Test fun estimatesSurviveCompactionUsedByBackupAndRestore() {

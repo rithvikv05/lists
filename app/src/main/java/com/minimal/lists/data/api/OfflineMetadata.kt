@@ -11,7 +11,7 @@ fun compactMetadataSnapshot(raw: String): String {
         if (supplied != null && supplied.toString().toByteArray(Charsets.UTF_8).size <= 2048) supplied.toString()
         else {
             val snapshot = JSONObject()
-            for (key in listOf("schemaVersion", "id", "revision", "entityKind", "ratings", "isbn", "sourceRefs", "genres", "platforms", "totalChapters", "totalVolumes", "totalIssues", "runtimeMinutes", "gamePlaytime")) {
+            for (key in listOf("schemaVersion", "id", "revision", "entityKind", "ratings", "isbn", "sourceRefs", "genres", "platforms", "totalChapters", "totalVolumes", "totalIssues", "runtimeMinutes", "gamePlaytime", "gameCompletionLog")) {
                 if (root.has(key) && !root.isNull(key)) snapshot.put(key, root.get(key))
             }
             if (root.has("canonicalId")) snapshot.put("id", root.optString("canonicalId"))
