@@ -116,6 +116,22 @@ object RatingConverter {
         return (item.reviewRating in 1..4) || (item.userRating > 0f)
     }
 
+    /** The editor's stored ten-point value is meaningful only after a personal rating exists. */
+    fun getPersonalEditorScore(item: ListItem): Float {
+        if (!isRatedByUser(item)) return 0f
+        if (item.userRating > 0f && item.rating > 0f &&
+            (kotlin.math.abs(item.rating - item.userRating) < 0.01f ||
+                kotlin.math.abs(item.rating - item.userRating * 2f) < 0.01f)) return item.rating
+        if (item.userRating > 0f) return getUserRatingScore(item).coerceAtLeast(0f)
+        return when (item.reviewRating) {
+            REVIEW_SKIP -> 2.5f
+            REVIEW_TIMEPASS -> 5f
+            REVIEW_GO_FOR_IT -> 7.5f
+            REVIEW_PERFECTION -> 10f
+            else -> 0f
+        }
+    }
+
     /**
      * Unified user rating score (on a 10-point scale) for sorting.
      * If unrated, returns -1f so unrated items go to the bottom.
