@@ -10,10 +10,20 @@ import { steamDetails, tmdbDetails } from '../providers/details';
 import { EngineEnv, fallbackPlan, providerPlan, SearchOptions } from './providers';
 
 export function rankResults(records: SearchResult[], options: SearchOptions, allowSparseGames = false): SearchResult[] {
-  return deduplicateAndMerge(records.filter(r => visibleGame(r, options.includeExtras, allowSparseGames)))
+  const merged = deduplicateAndMerge(records.filter(r => visibleGame(r, options.includeExtras, allowSparseGames)))
     .filter(r => !options.author || matchesBookAuthor(r.creator, options.author))
     .filter(r => !options.year || r.releaseYear === options.year || r.editions?.some(e => e.releaseDate?.startsWith(options.year!)))
-    .filter(r => options.yearStart === undefined || (Number(r.releaseYear) >= options.yearStart && Number(r.releaseYear) <= options.yearEnd!))
+    .filter(r => options.yearStart === undefined || (Number(r.releaseYear) >= options.yearStart && Number(r.releaseYear) <= options.yearEnd!));
+  const normalizeTitle = (title: string) => title.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const normalizedQuery = options.category === 'MOVIE' ? normalizeTitle(options.query) : '';
+  const matchesTitle = (result: SearchResult) => [result.title, ...(result.aliases || [])]
+    .some(title => normalizeTitle(title) === normalizedQuery);
+  const canonicalMovieYears = new Set(normalizedQuery ? merged.filter(result =>
+    result.sourceRefs?.some(ref => ref.source === 'tmdb') && matchesTitle(result)).map(result => result.releaseYear) : []);
+  // OMDb can classify commentary and podcasts as movies. Drop its near matches in the year of a canonical exact match.
+  return merged.filter(result => !(canonicalMovieYears.has(result.releaseYear) && !matchesTitle(result) &&
+    result.sourceRefs?.some(ref => ref.source === 'omdb') &&
+    result.sourceRefs.every(ref => ['omdb', 'imdb'].includes(ref.source))))
     .map(result => ({ result, score: Math.max(...[result.title, ...(result.aliases || [])].map(title =>
       calculateRelevance(options.query, options.query, options.year, { ...result, title }))) }))
     .filter(({ score }) => score >= 30)

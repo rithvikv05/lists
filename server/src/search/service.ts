@@ -17,7 +17,7 @@ export async function searchMetadata(options: SearchOptions, env: EngineEnv): Pr
   const { CATALOG_DB, ...configuration } = env;
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(Object.fromEntries(Object.entries(configuration).sort(([a], [b]) => a.localeCompare(b))))));
   const fingerprint = [...new Uint8Array(digest)].map(n => n.toString(16).padStart(2, '0')).join('');
-  const key = `v3.2|${CATALOG_DB ? "catalog" : "transient"}|${fingerprint}|${JSON.stringify([options.category, options.query.normalize('NFKC'), options.mode, options.year || '', options.lang || '', options.country || 'US', options.includeExtras || false, options.yearStart || '', options.yearEnd || '', options.backup || false, options.author || ''])}`;
+  const key = `${options.category === 'MOVIE' ? 'v3.3' : 'v3.2'}|${CATALOG_DB ? "catalog" : "transient"}|${fingerprint}|${JSON.stringify([options.category, options.query.normalize('NFKC'), options.mode, options.year || '', options.lang || '', options.country || 'US', options.includeExtras || false, options.yearStart || '', options.yearEnd || '', options.backup || false, options.author || ''])}`;
   const cached = getCachedSearch(key);
   if (cached) return { ...cached, source: 'cache' };
   return coalesceSearch(key, async () => {

@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import app from '../src/index';
 import { calculateRelevance } from '../src/ranker/relevanceScorer';
 import { searchOmdbMovies } from '../src/providers/movies/omdbMovie';
+import { rankResults } from '../src/search/engine';
+import { SearchResult } from '../src/types';
 
 test('movie details keep regional certifications separate and use the theatrical date', async (t) => {
   t.mock.method(globalThis, 'fetch', async (input: URL) => {
@@ -46,4 +48,18 @@ test('OMDb movie search excludes episodes returned despite the upstream type fil
   ] }));
   assert.deepEqual((await searchOmdbMovies('Mission Impossible', 'example', '1996')).map(result => result.title),
     ['Mission: Impossible']);
+});
+
+test('a canonical movie match suppresses same-year near matches from OMDb alone', () => {
+  const movie = (title: string, releaseYear: string, source: string, id: string): SearchResult => ({
+    title, releaseYear, releaseDate: '', category: 'MOVIE', creator: '', coverUrl: '', overview: '',
+    rating: 0, totalEpisodes: 0, totalPages: 0, externalUrl: '', sourceRefs: [{ source, id, url: '' }],
+  });
+  const canonical = movie('Mission: Impossible', '1996', 'tmdb', 'movie:1');
+  const podcast = movie('Mission Impossible Movie Recap', '1996', 'omdb', 'tt001');
+  const sequel = movie('Mission Impossible Sequel', '2000', 'omdb', 'tt002');
+  const options = { category: 'MOVIE', query: 'Mission Impossible', mode: 'ALL' } as const;
+  assert.deepEqual(rankResults([canonical, podcast, sequel], options).map(result => result.title),
+    [canonical.title, sequel.title]);
+  assert.equal(rankResults([podcast], options)[0]?.title, podcast.title);
 });
