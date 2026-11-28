@@ -14,6 +14,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -100,7 +102,9 @@ fun AddItemScreen(
     var manualEntryPrefillIsbn by remember { mutableStateOf("") }
 
     val yearOptions = remember {
-        listOf("All", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2015", "2010", "2000s", "1990s")
+        (2099 downTo 1800).flatMap { year ->
+            if (year % 10 == 0) listOf(year.toString(), "${year}s") else listOf(year.toString())
+        }
     }
 
     val languageOptions = remember {
@@ -344,7 +348,7 @@ fun AddItemScreen(
                     Box {
                         Surface(
                             onClick = {
-                                if (isYearActive) selectedYear = null else isYearMenuOpen = true
+                                isYearMenuOpen = true
                             },
                             shape = RoundedCornerShape(10.dp),
                             color = if (isYearActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -369,7 +373,7 @@ fun AddItemScreen(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Icon(
-                                    imageVector = if (isYearActive) Icons.Default.Close else Icons.Default.KeyboardArrowDown,
+                                    imageVector = Icons.Default.KeyboardArrowDown,
                                     contentDescription = null,
                                     tint = if (isYearActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(15.dp)
@@ -377,19 +381,33 @@ fun AddItemScreen(
                             }
                         }
 
-                        DropdownMenu(
-                            expanded = isYearMenuOpen,
-                            onDismissRequest = { isYearMenuOpen = false }
-                        ) {
-                            yearOptions.forEach { y ->
-                                DropdownMenuItem(
-                                    text = { Text(y, style = MaterialTheme.typography.bodyMedium) },
-                                    onClick = {
-                                        selectedYear = if (y == "All") null else y
-                                        isYearMenuOpen = false
-                                    }
-                                )
+                        if (isYearMenuOpen) {
+                            var yearQuery by remember { mutableStateOf("") }
+                            val matching = remember(yearQuery) { yearOptions.filter { it.startsWith(yearQuery) } }
+                            val initialYear = selectedYear ?: java.time.Year.now().value.toString()
+                            val yearListState = rememberLazyListState(yearOptions.indexOf(initialYear).coerceAtLeast(0))
+                            LaunchedEffect(yearQuery) {
+                                if (yearQuery.isNotEmpty() && matching.isNotEmpty()) yearListState.scrollToItem(0)
                             }
+                            AlertDialog(onDismissRequest = { isYearMenuOpen = false },
+                                title = { Text("Release year") },
+                                text = {
+                                    Column {
+                                        OutlinedTextField(yearQuery, { yearQuery = it.filter(Char::isDigit).take(4) },
+                                            label = { Text("Find a year") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
+                                        LazyColumn(state = yearListState, modifier = Modifier.heightIn(max = 300.dp)) {
+                                            items(matching, key = { it }) { year ->
+                                                DropdownMenuItem(text = { Text(year) },
+                                                    trailingIcon = if (year == selectedYear) ({ Icon(Icons.Default.Check, "Selected") }) else null,
+                                                    onClick = { selectedYear = year; isYearMenuOpen = false })
+                                            }
+                                        }
+                                    }
+                                },
+                                confirmButton = { TextButton(onClick = { selectedYear = null; isYearMenuOpen = false }) { Text("Any year") } },
+                                dismissButton = { TextButton(onClick = { isYearMenuOpen = false }) { Text("Cancel") } })
                         }
                     }
 
@@ -586,7 +604,9 @@ fun AddItemScreen(
                     }
 
                     // Search Results List
-                    items(searchResults, key = { it.title + it.releaseYear + it.creator }) { result ->
+                    itemsIndexed(searchResults, key = { index, result ->
+                        "${result.engineId.ifBlank { result.externalUrl }}:$index"
+                    }) { _, result ->
                         val isAlreadyAdded = existingItems.any {
                             it.title.equals(result.title, ignoreCase = true) &&
                                     (result.releaseYear.isEmpty() || it.releaseYear == result.releaseYear)
@@ -655,7 +675,8 @@ fun AddItemScreen(
                                     )
 
                                     val pageInfo = if (result.totalPages > 0) "${result.totalPages}p" else ""
-                                    val subtitle = listOf(result.creator, result.releaseYear, pageInfo)
+                                    val genres = if (result.category in listOf(Category.MOVIE, Category.TV_SHOW)) result.genres.take(2) else emptyList()
+                                    val subtitle = (listOf(result.releaseYear, result.creator, pageInfo) + genres)
                                         .filter { it.isNotBlank() }
                                         .joinToString(" · ")
 

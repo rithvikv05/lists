@@ -12,7 +12,10 @@ export function calculateRelevance(
   const cleanQLower = cleanQuery.toLowerCase().trim();
   const origQLower = query.toLowerCase().trim();
 
-  let score = 0;
+  const withoutPunctuation = (value: string) => value.replace(/[\p{P}\p{S}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  const normalizedQuery = withoutPunctuation(cleanQLower);
+  let score = normalizedQuery && titleLower !== cleanQLower &&
+    withoutPunctuation(titleLower) === normalizedQuery ? 100 : 0;
 
   // Exact match
   if (titleLower === cleanQLower || titleLower === origQLower) {

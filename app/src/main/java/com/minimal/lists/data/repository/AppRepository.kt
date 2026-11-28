@@ -58,6 +58,7 @@ class AppRepository(private val context: Context) {
     suspend fun getListSync(id: Long): UserList? = listDao.getListByIdSync(id)
     suspend fun getListSyncAll(): List<UserList> = withContext(Dispatchers.IO) { listDao.getAllListsSync() }
 
+    fun getActiveItemsByCategory(category: Category): Flow<List<ListItem>> = itemDao.getActiveItemsByCategory(category.id)
     fun getItems(listId: Long): Flow<List<ListItem>> = itemDao.getItemsForList(listId)
     fun getItem(id: Long): Flow<ListItem?> = itemDao.getItemById(id)
     suspend fun getItemSync(id: Long): ListItem? = itemDao.getItemByIdSync(id)

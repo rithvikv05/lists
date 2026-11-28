@@ -59,6 +59,9 @@ interface ListDao {
 
 @Dao
 interface ItemDao {
+    @Query("SELECT items.* FROM items JOIN lists ON lists.id = items.listId WHERE items.category = :category AND lists.isArchived = 0")
+    fun getActiveItemsByCategory(category: String): Flow<List<ListItem>>
+
     @Query("UPDATE items SET customOrder = :position, updatedAt = :now WHERE id = :id AND listId = :listId")
     suspend fun setOrder(listId: Long, id: Long, position: Int, now: Long)
     @Query("SELECT * FROM items WHERE listId = :listId ORDER BY pinned DESC, id DESC")

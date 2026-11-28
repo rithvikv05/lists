@@ -55,6 +55,7 @@ import com.minimal.lists.data.storage.RollingBackupManager
 import com.minimal.lists.data.sync.DriveSyncManager
 import com.minimal.lists.data.sync.GoogleSignInHelper
 import com.minimal.lists.data.sync.SyncWorker
+import com.minimal.lists.ui.components.RELEASE_CALENDAR_PREF
 import com.minimal.lists.ui.components.triggerAsmrTick
 import com.minimal.lists.ui.components.triggerStrongTick
 import com.minimal.lists.ui.theme.AppAccentColor
@@ -112,6 +113,7 @@ fun SettingsScreen(
     var isSyncing by remember { mutableStateOf(false) }
 
     val settingsPrefs = remember { context.getSharedPreferences("lists_settings_prefs", Context.MODE_PRIVATE) }
+    var showReleaseCalendar by remember(settingsPrefs) { mutableStateOf(settingsPrefs.getBoolean(RELEASE_CALENDAR_PREF, true)) }
     var fallbackHour by remember { mutableStateOf(settingsPrefs.getInt("fallback_reminder_hour", 9)) }
     var fallbackMinute by remember { mutableStateOf(settingsPrefs.getInt("fallback_reminder_minute", 0)) }
 
@@ -495,6 +497,16 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
                             modifier = Modifier.padding(vertical = 4.dp)
                         )
+
+                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text("Show release calendar", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                            Switch(checked = showReleaseCalendar, onCheckedChange = { enabled ->
+                                showReleaseCalendar = enabled
+                                settingsPrefs.edit().putBoolean(RELEASE_CALENDAR_PREF, enabled).apply()
+                            })
+                        }
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                         // Line 3: Accent (Accent name on left, interactive color dot on right)
                         val activeAccent = AppAccentColor.fromId(activeAccentId)

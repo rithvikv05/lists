@@ -11,6 +11,7 @@ export function offlineSnapshot(result: SearchResult): Record<string, unknown> {
     ratings: (result.ratings || []).slice(0, 8).map(({ source, value, scale, count }) => ({ source, value, scale, ...(count === undefined ? {} : { count }) })),
     totalChapters: result.totalChapters || 0, totalVolumes: result.totalVolumes || 0,
     totalIssues: result.totalIssues || 0, runtimeMinutes: result.runtimeMinutes || 0,
+    ...(result.status ? { status: result.status } : {}),
   };
   // Titles, overview, cover, personal notes and progress already have typed local columns.
   for (const key of ['genres', 'platforms', 'ratings']) {

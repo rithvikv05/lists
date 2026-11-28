@@ -664,6 +664,14 @@ fun ListsScreen(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
+                val categoryForCalendar = selectedCategoryFilter
+                if (!isArchiveSelected && (categoryForCalendar == Category.MOVIE || categoryForCalendar == Category.TV_SHOW)) {
+                    val calendarItems by remember(repository, categoryForCalendar) {
+                        repository.getActiveItemsByCategory(categoryForCalendar)
+                    }.collectAsState(initial = emptyList())
+                    ReleaseCalendarButton(calendarItems, categoryForCalendar)
+                }
+
                 // Pull-to-refresh container for list content
                 PullToRefreshBox(
                     isRefreshing = isRefreshing,

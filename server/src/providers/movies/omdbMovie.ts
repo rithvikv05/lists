@@ -23,7 +23,7 @@ export async function searchOmdbMovies(
         const searchArr = data.Search || [];
         for (const item of searchArr) {
           const title = item.Title;
-          if (!title) continue;
+          if (!title || item.Type !== 'movie') continue;
 
           let poster = item.Poster || '';
           if (poster === 'N/A') poster = '';

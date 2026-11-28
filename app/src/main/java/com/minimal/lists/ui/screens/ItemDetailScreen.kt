@@ -76,6 +76,8 @@ import com.minimal.lists.data.reminder.EpisodeReminderManager
 import com.minimal.lists.data.repository.AppRepository
 import com.minimal.lists.ui.components.GameCompletionCard
 import com.minimal.lists.ui.components.GamePlatformsCard
+import com.minimal.lists.ui.components.FullScreenCover
+import com.minimal.lists.ui.components.ScreenInformation
 import com.minimal.lists.ui.components.CoverImage
 import com.minimal.lists.ui.components.triggerAsmrTick
 import com.minimal.lists.ui.components.triggerStrongTick
@@ -144,6 +146,9 @@ fun ItemDetailScreen(
             repository.ensureBookPages(currentItem)
         }
     }
+
+    var showFullCover by remember(currentItem.id) { mutableStateOf(false) }
+    if (showFullCover) FullScreenCover(currentItem) { showFullCover = false }
 
     var showOptionsSheet by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
@@ -286,6 +291,7 @@ fun ItemDetailScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(16.dp))
+                                        .clickable(onClickLabel = "View full-screen cover") { showFullCover = true }
                                 )
                             }
 
@@ -355,7 +361,8 @@ fun ItemDetailScreen(
                                         repository = repository,
                                         scope = scope,
                                         context = context,
-                                        showCover = true
+                                        showCover = true,
+                                        onCoverClick = { showFullCover = true }
                                     )
                                 }
                             }
@@ -762,6 +769,7 @@ fun ItemCategoryBodySections(
     when (category) {
         Category.MOVIE -> {
             RatingCardSection(item = currentItem, repository = repository, scope = scope, context = context)
+            ScreenInformation(currentItem, category)
             OverviewSection(currentItem.overview)
         }
 
@@ -774,6 +782,7 @@ fun ItemCategoryBodySections(
                 scope = scope,
                 context = context
             )
+            if (category == Category.TV_SHOW) ScreenInformation(currentItem, category)
             OverviewSection(currentItem.overview)
         }
 
@@ -898,7 +907,8 @@ fun UnifiedTopHeroSection(
     repository: AppRepository,
     scope: kotlinx.coroutines.CoroutineScope,
     context: Context,
-    showCover: Boolean = true
+    showCover: Boolean = true,
+    onCoverClick: () -> Unit = {}
 ) {
     var ottPlatforms by remember { mutableStateOf<List<OttPlatform>>(emptyList()) }
     var isLoadingOtt by remember { mutableStateOf(false) }
@@ -942,6 +952,7 @@ fun UnifiedTopHeroSection(
                     modifier = Modifier
                         .width(104.dp)
                         .clip(RoundedCornerShape(12.dp))
+                        .clickable(onClickLabel = "View full-screen cover", onClick = onCoverClick)
                 )
 
                 Spacer(modifier = Modifier.width(14.dp))
@@ -1748,6 +1759,12 @@ fun SeasonEpisodeTracker(
     }
 
     val checkedKeys = remember(item.checkedEpisodesJson) { repository.parseCheckedKeys(item.checkedEpisodesJson) }
+    val nextEpisode = remember(rawEpisodes, checkedKeys) {
+        val regular = rawEpisodes.filter { it.season > 0 && it.number > 0 }
+            .distinctBy { it.key }.sortedWith(compareBy({ it.season }, { it.number }))
+        val position = regular.indexOfLast { it.key in checkedKeys }
+        regular.getOrNull(position + 1)?.takeUnless { isEpisodeLocked(it.airdate) }
+    }
     val allEpisodeKeys = remember(rawEpisodes) { rawEpisodes.map { it.key } }
 
     val distinctSeasons = remember(rawEpisodes) {
@@ -1757,7 +1774,7 @@ fun SeasonEpisodeTracker(
 
     LaunchedEffect(item.id, distinctSeasons, checkedKeys) {
         if (!seasonInitialized) {
-            selectedSeason = currentProgressSeason(rawEpisodes, checkedKeys, item.currentSeason)
+            selectedSeason = nextEpisode?.season ?: currentProgressSeason(rawEpisodes, checkedKeys, item.currentSeason)
             seasonInitialized = true
         } else if (selectedSeason !in distinctSeasons && distinctSeasons.isNotEmpty()) {
             selectedSeason = distinctSeasons.first()
@@ -1778,6 +1795,13 @@ fun SeasonEpisodeTracker(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
+            nextEpisode?.let { episode ->
+                TextButton(onClick = { selectedSeason = episode.season }, contentPadding = PaddingValues(horizontal = 0.dp, vertical = 6.dp)) {
+                    Text("Up Next · S${episode.season} E${episode.number} · ${episode.name}",
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Start)
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1825,7 +1849,7 @@ fun SeasonEpisodeTracker(
             Spacer(modifier = Modifier.height(14.dp))
 
             val seasonListState = rememberLazyListState()
-            LaunchedEffect(item.id, seasonInitialized) {
+            LaunchedEffect(item.id, seasonInitialized, selectedSeason) {
                 if (seasonInitialized) {
                     val index = distinctSeasons.indexOf(selectedSeason)
                     if (index >= 0) seasonListState.scrollToItem(index)
@@ -1864,6 +1888,7 @@ fun SeasonEpisodeTracker(
 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 episodesInSeason.forEach { ep ->
+                    val isNext = nextEpisode?.key == ep.key
                     val isChecked = checkedKeys.contains(ep.key)
                     val isLocked = isEpisodeLocked(ep.airdate)
 
@@ -1877,8 +1902,10 @@ fun SeasonEpisodeTracker(
                             }
                         },
                         shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
-                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                        color = if (isNext) MaterialTheme.colorScheme.primary.copy(alpha = 0.09f)
+                            else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+                        border = BorderStroke(0.5.dp, if (isNext) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -1898,7 +1925,11 @@ fun SeasonEpisodeTracker(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 val cleanAirdate = ep.airdate.trim()
-                                val dateSubtitle = if (isLocked) "Upcoming • $cleanAirdate" else cleanAirdate
+                                val dateSubtitle = when {
+                                    isNext -> listOf("Up Next", cleanAirdate).filter { it.isNotBlank() }.joinToString(" · ")
+                                    isLocked -> "Upcoming • $cleanAirdate"
+                                    else -> cleanAirdate
+                                }
                                 if (dateSubtitle.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(

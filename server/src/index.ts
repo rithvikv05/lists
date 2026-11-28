@@ -1,3 +1,4 @@
+import { screenInfo } from './providers/screenInfo';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
@@ -161,6 +162,30 @@ app.on('POST', ['/v1/resolve', '/v2/resolve'], async c => {
   }
   resolution.results = resolution.results.map(r => ({ ...r, offlineSnapshot: offlineSnapshot(r) }));
   return c.json(resolution);
+});
+
+// Fetch only the details needed by the item screen and personal release calendar.
+app.get('/v2/screen-info', async c => {
+  const kind = c.req.query('kind');
+  const id = c.req.query('id') || '';
+  const title = (c.req.query('title') || '').trim();
+  const year = c.req.query('year') || '';
+  const country = c.req.query('country') || 'IN';
+  if ((kind !== 'movie' && kind !== 'tv') || (id ? !/^\d{1,12}$/.test(id) : !title || title.length > 200) ||
+      (year && !/^\d{4}$/.test(year)) || !/^[A-Z]{2}$/.test(country)) return c.json({ error: 'Invalid screen identity' }, 400);
+  const cache = typeof caches !== 'undefined' ? caches.default : undefined;
+  const key = new Request(c.req.url);
+  const cached = await cache?.match(key);
+  if (cached) return cached;
+  const env = environment(c.env);
+  const token = env.TMDB_API_KEY || env.TMDB_READ_ACCESS_TOKEN;
+  if (!token) return c.json({ error: 'Screen information unavailable' }, 503);
+  const result = await screenInfo(kind, id, title, year, country, token);
+  if (!result) return c.json({ error: 'No unambiguous title match' }, 404);
+  const response = c.json(result);
+  response.headers.set('Cache-Control', 'public, max-age=21600');
+  if (cache) c.executionCtx.waitUntil(cache.put(key, response.clone()));
+  return response;
 });
 
 // Enrichment requires an identifier, so similarly named shows never exchange episodes.

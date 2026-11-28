@@ -727,6 +727,8 @@ fun ListDetailScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                if (list != null && selectedItemIds.isEmpty()) ReleaseCalendarButton(rawItems, category)
+
                 // Media Items Display with completion circle toggle & automatic completed-to-bottom sorting
                 PullToRefreshBox(
                     isRefreshing = isRefreshing,
