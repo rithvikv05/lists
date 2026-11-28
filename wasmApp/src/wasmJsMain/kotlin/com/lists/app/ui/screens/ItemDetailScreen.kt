@@ -10,6 +10,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -59,6 +61,7 @@ import com.lists.app.statusBarsPadding
 import com.lists.app.triggerAsmrTick
 import com.lists.app.triggerStrongTick
 import com.lists.app.data.api.EpisodeItem
+import com.lists.app.data.api.currentProgressSeason
 import com.lists.app.data.api.OttPlatform
 import com.lists.app.data.api.SearchRepository
 import com.lists.app.data.api.GamePlaytimeRepository
@@ -1610,10 +1613,11 @@ fun SeasonEpisodeTracker(
     scope: kotlinx.coroutines.CoroutineScope,
     context: Context
 ) {
-    var rawEpisodes by remember { mutableStateOf<List<EpisodeItem>>(emptyList()) }
-    var selectedSeason by remember { mutableStateOf(1) }
+    var rawEpisodes by remember(item.id) { mutableStateOf<List<EpisodeItem>>(emptyList()) }
+    var selectedSeason by remember(item.id) { mutableStateOf(1) }
+    var seasonInitialized by remember(item.id) { mutableStateOf(false) }
 
-    LaunchedEffect(item.title, item.episodesDataJson) {
+    LaunchedEffect(item.id, item.title, item.episodesDataJson) {
         if (item.episodesDataJson.isNotBlank()) {
             try {
                 rawEpisodes = appJson.decodeFromString<List<EpisodeItem>>(item.episodesDataJson)
@@ -1662,8 +1666,11 @@ fun SeasonEpisodeTracker(
         if (s.isEmpty()) listOf(1) else s
     }
 
-    LaunchedEffect(distinctSeasons) {
-        if (!distinctSeasons.contains(selectedSeason) && distinctSeasons.isNotEmpty()) {
+    LaunchedEffect(item.id, distinctSeasons, checkedKeys) {
+        if (!seasonInitialized) {
+            selectedSeason = currentProgressSeason(rawEpisodes, checkedKeys, item.currentSeason)
+            seasonInitialized = true
+        } else if (selectedSeason !in distinctSeasons && distinctSeasons.isNotEmpty()) {
             selectedSeason = distinctSeasons.first()
         }
     }
@@ -1728,13 +1735,20 @@ fun SeasonEpisodeTracker(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
+            val seasonListState = rememberLazyListState()
+            LaunchedEffect(item.id, seasonInitialized) {
+                if (seasonInitialized) {
+                    val index = distinctSeasons.indexOf(selectedSeason)
+                    if (index >= 0) seasonListState.scrollToItem(index)
+                }
+            }
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                state = seasonListState,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                distinctSeasons.forEach { s ->
+                items(distinctSeasons.size) { index ->
+                    val s = distinctSeasons[index]
                     val isTabActive = s == selectedSeason
                     Surface(
                         onClick = {
